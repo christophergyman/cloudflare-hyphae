@@ -276,7 +276,15 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
     await this.env.BLOBS?.put(hash, bytes);
 
     const core = this.ensureCore();
-    const entry = core.applyResolution(change.path, hash, "merging-agent", Date.now());
+    const entry = core.applyResolution(
+      change.path,
+      hash,
+      result.conflict.theirsHash,
+      "merging-agent",
+      Date.now(),
+    );
+    // If the resolution was stale (the file moved on), do not broadcast it.
+    if (entry?.blobHash !== hash) return;
     await this.persistManifest();
     this.broadcast(
       JSON.stringify({
@@ -307,6 +315,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
   override async alarm(): Promise<void> {
     await super.alarm();
     await this.maybeCheckpoint();
+    await this.rearmCheckpointAlarm();
   }
 
   /** Commit to durable history if the scheduler says it is due. */
@@ -315,30 +324,46 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
     const decision = this.checkpoints.due(Date.now());
     if (!decision) return;
 
+    const generation = this.checkpoints.generation;
     const core = this.ensureCore();
-    await runCheckpoint(this.env.REPO_STORE, {
+    const result = await runCheckpoint(this.env.REPO_STORE, {
       repo: STORE_REPO,
       entries: core.manifestEntries(),
       readBlob: this.blobReader(),
       message: `checkpoint (${decision.reason})`,
     });
-    this.checkpoints.onCommitted();
+
+    if (result.missing.length > 0) {
+      // Some content could not be read, so the durable commit is incomplete.
+      // Stay pending rather than marking the checkpoint done, so it retries.
+      return;
+    }
+    // A change that landed mid-commit keeps the scheduler pending.
+    this.checkpoints.onCommitted(generation);
   }
 
   /** Public method: force a checkpoint now (manual trigger, ADR-006). */
   async checkpoint(): Promise<{ committed: boolean }> {
     if (!this.env.REPO_STORE) return { committed: false };
-    const forced = this.checkpoints.force();
-    if (!forced) return { committed: false };
+    // A manual checkpoint commits the current state regardless of timing.
+    const generation = this.checkpoints.generation;
     const core = this.ensureCore();
-    await runCheckpoint(this.env.REPO_STORE, {
+    const result = await runCheckpoint(this.env.REPO_STORE, {
       repo: STORE_REPO,
       entries: core.manifestEntries(),
       readBlob: this.blobReader(),
       message: "checkpoint (manual)",
     });
-    this.checkpoints.onCommitted();
-    return { committed: true };
+    if (result.missing.length === 0) this.checkpoints.onCommitted(generation);
+    return { committed: result.missing.length === 0 };
+  }
+
+  /** Re-arm the checkpoint alarm if changes are still pending. */
+  private async rearmCheckpointAlarm(): Promise<void> {
+    const next = this.checkpoints.nextCheckAt();
+    if (next !== null) {
+      await this.ctx.storage.setAlarm(next);
+    }
   }
 
   private async storeInline(base64: string): Promise<string> {

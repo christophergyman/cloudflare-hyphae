@@ -25,9 +25,10 @@ export interface WatcherOptions {
 }
 
 const DEFAULT_IGNORE = (path: string): boolean => {
-  if (path.includes("/.git/") || path.endsWith("/.git")) return true;
+  const segments = path.split(/[\\/]+/).filter(Boolean);
+  if (segments.includes(".git")) return true;
+  if (segments.includes("node_modules")) return true;
   if (path.includes(".hyphae-tmp-")) return true;
-  if (path.includes("/node_modules/")) return true;
   return false;
 };
 
@@ -40,6 +41,8 @@ export class Watcher {
   private readonly actorId: string;
   private watcher: ReturnType<typeof watch> | null = null;
   private socket: WebSocket | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = false;
 
   constructor(options: WatcherOptions) {
     this.ignore = options.ignore ?? DEFAULT_IGNORE;
@@ -55,6 +58,8 @@ export class Watcher {
   }
 
   start(): void {
+    if (this.watcher) return; // already started
+    this.stopped = false;
     this.watcher = watch(this.root, { recursive: true }, (_event, filename) => {
       if (!filename) return;
       const rel = filename.toString();
@@ -66,10 +71,16 @@ export class Watcher {
 
   /**
    * Open a WebSocket to the Hub and wire it to the sync engine. Reconnects on
-   * close. Blobs are moved with plain fetch (R2 presigned URLs in production;
-   * a direct endpoint here), so only control messages ride the socket.
+   * close, unless stopped. Blobs are moved with plain fetch (R2 presigned URLs
+   * in production; a direct endpoint here), so only control messages ride the
+   * socket.
    */
   private connect(): void {
+    if (this.stopped) return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     const base = this.hub as string;
     const wsUrl = `${base.replace(/^http/, "ws")}/agents/hub/${this.repo}?actorId=${encodeURIComponent(this.actorId)}`;
     const socket = new WebSocket(wsUrl);
@@ -89,6 +100,7 @@ export class Watcher {
             });
           },
           onOpen: (cb) => cb(),
+          onClose: (cb) => socket.addEventListener("close", () => cb()),
         },
         async (hash) => {
           const res = await fetch(`${base}/blobs/${hash}`);
@@ -104,11 +116,17 @@ export class Watcher {
     });
 
     socket.addEventListener("close", () => {
-      setTimeout(() => this.connect(), 1000);
+      if (this.stopped) return;
+      this.reconnectTimer = setTimeout(() => this.connect(), 1000);
     });
   }
 
   stop(): void {
+    this.stopped = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.watcher?.close();
     this.watcher = null;
     this.socket?.close();

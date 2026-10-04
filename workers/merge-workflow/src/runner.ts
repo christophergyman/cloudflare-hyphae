@@ -86,7 +86,9 @@ export function makeMergeRunner(env: RunnerEnv) {
 
       const verifier: SandboxVerifier = {
         async verify({ path, files, command }) {
-          if (!env.Sandbox) return { green: true }; // no sandbox: accept model output
+          // No sandbox means we cannot prove the merge. Refuse, so the caller
+          // keeps both sides. Never accept unverified model output (ADR-014).
+          if (!env.Sandbox) return { green: false, output: "no sandbox configured" };
           for (const file of files) {
             await env.Sandbox.writeFile(file.path, new TextDecoder().decode(file.content));
           }

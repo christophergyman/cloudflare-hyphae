@@ -66,12 +66,26 @@ describe("ChangeDetector", () => {
     files.set("a.txt", enc.encode("remote-content"));
     const hash = await sha256Hex(enc.encode("remote-content"));
     const d = detector(files);
-    d.noteOwnWrite(hash);
+    d.noteOwnWrite("a.txt", hash);
     const seen: string[] = [];
     d.onChanges((changes) => seen.push(...changes.map((c) => c.path)));
     d.event("a.txt");
     await d.flush();
     expect(seen).toEqual([]);
+  });
+
+  it("does not suppress identical content on a different path (empty files)", async () => {
+    const files = new Map<string, Uint8Array>();
+    files.set("b.txt", new Uint8Array()); // a new empty file the user created
+    const emptyHash = await sha256Hex(new Uint8Array());
+    const d = detector(files);
+    // The client earlier wrote an empty file at another path.
+    d.noteOwnWrite("a.txt", emptyHash);
+    const seen: string[] = [];
+    d.onChanges((changes) => seen.push(...changes.map((c) => `${c.kind}:${c.path}`)));
+    d.event("b.txt");
+    await d.flush();
+    expect(seen).toEqual(["add:b.txt"]);
   });
 
   it("coalesces repeated events for the same path", async () => {

@@ -14,7 +14,9 @@ import {
  */
 
 function buildAgent(modelContent: string | null, green: boolean, confidence?: number) {
-  const model: MergeModel = { resolve: async () => ({ content: modelContent, confidence }) };
+  const model: MergeModel = {
+    resolve: async () => ({ content: modelContent, confidence: confidence ?? 0.9 }),
+  };
   const verifier: SandboxVerifier = {
     verify: async () => (green ? { green: true } : { green: false, output: "1 failed" }),
   };

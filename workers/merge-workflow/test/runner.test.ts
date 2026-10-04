@@ -63,3 +63,17 @@ describe("makeMergeRunner", () => {
     expect(out.status).toBe("kept-both");
   });
 });
+
+describe("makeMergeRunner: no sandbox", () => {
+  it("refuses to accept an unverified merge when no sandbox is configured", async () => {
+    const runner = makeMergeRunner({
+      AI: {
+        async run() {
+          return { response: "UNVERIFIED" };
+        },
+      },
+    });
+    const out = await runner.run({ repoId: "r", path: "f", base: "a", ours: "b", theirs: "c" });
+    expect(out.status).toBe("kept-both");
+  });
+});

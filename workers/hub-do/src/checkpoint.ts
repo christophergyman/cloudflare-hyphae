@@ -23,7 +23,9 @@ export const DEFAULT_CHECKPOINT_CONFIG: CheckpointConfig = {
   ceilingMs: 5 * 60_000,
 };
 
-type State = { phase: "idle" } | { phase: "pending"; firstChangeAt: number; lastChangeAt: number };
+type State =
+  | { phase: "idle" }
+  | { phase: "pending"; firstChangeAt: number; lastChangeAt: number; generation: number };
 
 export class CheckpointScheduler {
   private state: State = { phase: "idle" };
@@ -36,9 +38,10 @@ export class CheckpointScheduler {
   /** Record that the live state changed. */
   onChange(now: number): void {
     if (this.state.phase === "idle") {
-      this.state = { phase: "pending", firstChangeAt: now, lastChangeAt: now };
+      this.state = { phase: "pending", firstChangeAt: now, lastChangeAt: now, generation: 1 };
     } else {
       this.state.lastChangeAt = now;
+      this.state.generation++;
     }
   }
 
@@ -63,8 +66,29 @@ export class CheckpointScheduler {
     );
   }
 
-  /** Mark a commit as completed; the scheduler returns to idle. */
-  onCommitted(): void {
+  /**
+   * The current generation, captured before a commit starts. Pass it back to
+   * `onCommitted` so a change that arrived mid-commit keeps the scheduler
+   * pending instead of being marked done (which would stall the checkpoint).
+   */
+  get generation(): number {
+    return this.state.phase === "pending" ? this.state.generation : 0;
+  }
+
+  /**
+   * Mark a commit as completed. If changes arrived since `generation` was
+   * captured, stay pending so the new state is checkpointed too.
+   */
+  onCommitted(generation?: number): void {
+    if (
+      generation !== undefined &&
+      this.state.phase === "pending" &&
+      this.state.generation !== generation
+    ) {
+      // A change landed during the commit: keep pending, reset the quiet clock.
+      this.state.firstChangeAt = this.state.lastChangeAt;
+      return;
+    }
     this.state = { phase: "idle" };
   }
 

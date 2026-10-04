@@ -18,6 +18,17 @@ export const PROTOCOL_VERSION = 1 as const;
 // ---------------------------------------------------------------------------
 
 export const blobHashSchema = z.string().min(1);
+/** A repo-relative path: no absolute, no traversal, no .git, no NUL. */
+export const safePathSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((p) => !p.startsWith("/") && !/^[a-zA-Z]:[\\/]/.test(p), "path must be relative")
+  .refine((p) => !p.includes("\0") && !p.includes("\\"), "path must not contain NUL or backslash")
+  .refine((p) => {
+    const segments = p.split("/");
+    return segments.every((s) => s !== "" && s !== "." && s !== ".." && s !== ".git");
+  }, "path must not contain empty, ., .., or .git segments");
 export const manifestEntrySchema = z.object({
   blobHash: blobHashSchema,
   version: z.number().int().nonnegative(),
@@ -49,11 +60,17 @@ export const helloMessageSchema = z.object({
 export const changeMessageSchema = z
   .object({
     type: z.literal("change"),
-    id: z.string(),
-    path: z.string(),
+    id: z.string().min(1),
+    path: safePathSchema,
     baseHash: blobHashSchema.nullable(),
     newHash: blobHashSchema.nullable().optional(),
-    contentBase64: z.string().optional(),
+    // Bound inline content so a client cannot push an unbounded frame, and
+    // require valid base64 so the Hub never feeds garbage to atob.
+    contentBase64: z
+      .string()
+      .max(1_400_000)
+      .refine((s) => /^[A-Za-z0-9+/]*={0,2}$/.test(s) && s.length % 4 === 0, "invalid base64")
+      .optional(),
     sig: z.string().optional(),
   })
   .superRefine((m, ctx) => {

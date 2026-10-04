@@ -118,3 +118,29 @@ describe("ArtifactsRepoStore end-to-end", () => {
     expect(tree.map((f) => f.path).sort()).toEqual(["a.txt", "b.txt"]);
   });
 });
+
+describe("ArtifactsRepoStore: deletions", () => {
+  it("persists an all-delete checkpoint", async () => {
+    const store = new ArtifactsRepoStore(fakeArtifacts());
+    await store.createRepo("delall");
+    const enc = new TextEncoder();
+    const c1 = await store.writeCommit(
+      "delall",
+      null,
+      [
+        { path: "a.txt", content: enc.encode("aaa") },
+        { path: "b.txt", content: enc.encode("bbb") },
+      ],
+      "initial",
+      { name: "cman", email: "cman@example.com" },
+    );
+    expect((await store.readTree("delall", c1)).length).toBe(2);
+
+    // Everything deleted.
+    const c2 = await store.writeCommit("delall", c1, [], "all gone", {
+      name: "cman",
+      email: "cman@example.com",
+    });
+    expect((await store.readTree("delall", c2)).length).toBe(0);
+  });
+});

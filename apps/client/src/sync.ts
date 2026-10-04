@@ -12,7 +12,7 @@
  */
 
 import { sha256Hex } from "@hyphae/core";
-import type { ChangedMessage, HubMessage } from "@hyphae/protocol";
+import type { HubMessage } from "@hyphae/protocol";
 import { ChangeDetector, type DetectedChange, type SyncedState } from "./detector.ts";
 import { applyRemoteChange, type FileSystemPort } from "./paths.ts";
 
@@ -20,6 +20,7 @@ export interface ClientTransport {
   send(msg: unknown): void;
   onMessage(cb: (msg: HubMessage) => void): void;
   onOpen(cb: () => void): void;
+  onClose?(cb: () => void): void;
 }
 
 /** Fetches blob content from R2 (by hash) for applying remote changes. */
@@ -62,6 +63,10 @@ export class SyncEngine {
   }
 
   private online = false;
+  /** Highest manifest version applied per path, so a stale echo cannot clobber. */
+  private readonly appliedVersion = new Map<string, number>();
+  /** Guards against overlapping replay runs. */
+  private replaying = false;
 
   attach(transport: ClientTransport, fetchBlob: BlobFetcher, pushBlob: BlobPusher): void {
     this.transport = transport;
@@ -72,6 +77,10 @@ export class SyncEngine {
       this.online = true;
       transport.send({ type: "hello", actorId: "", repoId: "" });
       void this.replayQueue();
+    });
+    transport.onClose?.(() => {
+      this.online = false;
+      this.transport = null;
     });
     transport.onMessage((msg) => void this.handleRemote(msg));
   }
@@ -85,15 +94,32 @@ export class SyncEngine {
   private async handleLocalChanges(changes: DetectedChange[]): Promise<void> {
     for (const change of changes) {
       if (!this.online || !this.transport || !this.pushBlob) {
-        this.queued.push(change);
+        this.queueOffline(change);
         continue;
       }
-      await this.sendChange(change);
+      try {
+        await this.sendChange(change);
+      } catch {
+        // A failed send means the change was not delivered: queue it so it is
+        // replayed on reconnect instead of being lost.
+        this.queueOffline(change);
+      }
     }
   }
 
+  /**
+   * Queue an offline change, coalescing per path so only the latest state of
+   * each file is replayed (ADR-016). The queue is bounded.
+   */
+  private queueOffline(change: DetectedChange): void {
+    const existing = this.queued.findIndex((c) => c.path === change.path);
+    if (existing >= 0) this.queued.splice(existing, 1);
+    this.queued.push(change);
+    if (this.queued.length > 4096) this.queued.shift();
+  }
+
   private async sendChange(change: DetectedChange): Promise<void> {
-    if (!this.transport || !this.pushBlob) return;
+    if (!this.transport || !this.pushBlob) throw new Error("not connected");
     if (change.kind === "delete") {
       const base = this.synced.get(change.path) ?? null;
       this.transport.send({
@@ -117,14 +143,27 @@ export class SyncEngine {
     });
     this.synced.set(change.path, hash);
     // Record our own write so the watcher ignores its echo.
-    this.detector.noteOwnWrite(hash);
+    this.detector.noteOwnWrite(change.path, hash);
   }
 
   /** Replay queued changes after reconnect (ADR-016). */
   private async replayQueue(): Promise<void> {
-    while (this.queued.length > 0) {
-      const change = this.queued.shift();
-      if (change) await this.sendChange(change);
+    if (this.replaying) return;
+    this.replaying = true;
+    try {
+      while (this.queued.length > 0 && this.online) {
+        const change = this.queued[0];
+        if (!change) break;
+        try {
+          await this.sendChange(change);
+        } catch {
+          // Stop and keep the change queued for the next reconnect.
+          break;
+        }
+        this.queued.shift();
+      }
+    } finally {
+      this.replaying = false;
     }
   }
 
@@ -133,27 +172,45 @@ export class SyncEngine {
     if (msg.type === "manifest") {
       for (const [path, entry] of Object.entries(msg.entries)) {
         this.synced.set(path, entry.blobHash);
+        this.appliedVersion.set(path, entry.version);
       }
       return;
     }
     if (msg.type === "changed") {
-      await this.applyChanged(msg);
+      await this.applyChanged(msg.path, msg.newHash, msg.version);
+      return;
+    }
+    if (msg.type === "resolved") {
+      // The merging agent resolved a conflict: apply it like a change.
+      await this.applyChanged(msg.path, msg.newHash, Number.MAX_SAFE_INTEGER);
     }
   }
 
-  private async applyChanged(msg: ChangedMessage): Promise<void> {
+  /**
+   * Apply a remote version to disk. Ignores an out-of-order or already-applied
+   * version, so a stale echo cannot clobber newer local content.
+   */
+  private async applyChanged(path: string, newHash: string | null, version: number): Promise<void> {
     if (!this.fetchBlob) return;
-    if (msg.newHash === null) {
-      await applyRemoteChange(this.fs, this.root, msg.path, null);
-      this.synced.delete(msg.path);
+    const applied = this.appliedVersion.get(path) ?? -1;
+    if (version <= applied) return; // stale: newer content already applied
+    if (newHash !== null && this.synced.get(path) === newHash) {
+      this.appliedVersion.set(path, Math.max(applied, version));
+      return; // already at this exact content
+    }
+    if (newHash === null) {
+      await applyRemoteChange(this.fs, this.root, path, null);
+      this.synced.delete(path);
+      this.appliedVersion.set(path, version);
       return;
     }
-    const bytes = await this.fetchBlob(msg.newHash);
+    const bytes = await this.fetchBlob(newHash);
     if (bytes === null) return;
-    await applyRemoteChange(this.fs, this.root, msg.path, bytes);
-    this.synced.set(msg.path, msg.newHash);
+    await applyRemoteChange(this.fs, this.root, path, bytes);
+    this.synced.set(path, newHash);
+    this.appliedVersion.set(path, version);
     // Our own write: ignore the echo it will trigger.
-    this.detector.noteOwnWrite(msg.newHash);
+    this.detector.noteOwnWrite(path, newHash);
   }
 
   /** Number of changes waiting to be sent. */

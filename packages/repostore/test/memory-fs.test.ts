@@ -56,3 +56,14 @@ describe("MemoryFS", () => {
     expect(dec.decode((await fs.promises.readFile("/w/a.txt")) as Uint8Array)).toBe("orig");
   });
 });
+
+describe("MemoryFS read-side safety", () => {
+  it("does not alias the internal buffer on read", async () => {
+    const fs = new MemoryFS();
+    await fs.promises.writeFile("/w/a.txt", new Uint8Array([1, 2, 3]));
+    const first = (await fs.promises.readFile("/w/a.txt")) as Uint8Array;
+    first[0] = 99;
+    const second = (await fs.promises.readFile("/w/a.txt")) as Uint8Array;
+    expect(Array.from(second)).toEqual([1, 2, 3]);
+  });
+});

@@ -172,7 +172,10 @@ export class MemoryFS {
     if (entry.kind !== "file")
       throw new FsError("EISDIR", `EISDIR: illegal operation on a directory '${path}'`);
     const encoding = typeof options === "string" ? options : options?.encoding;
-    return encoding ? this.decoder.decode(entry.data) : (entry.data as Uint8Array);
+    const data = entry.data as Uint8Array;
+    // Copy on read so a consumer mutating the returned buffer cannot corrupt
+    // the stored tree (isomorphic-git may touch buffers during hashing).
+    return encoding ? this.decoder.decode(data) : data.slice();
   }
 
   async readdir(path: string): Promise<string[]> {
@@ -305,10 +308,10 @@ export class ArtifactsRepoStore implements RepoStore {
     }
 
     const staged = await stageAll(fs, dir);
-    if (staged.length === 0 && existingRef) {
+    // A commit is only a no-op when the tree is empty AND nothing was removed.
+    if (staged.added.length === 0 && staged.removed.length === 0 && existingRef) {
       return existingRef;
     }
-
     const commit = await git.commit({
       fs,
       dir,
@@ -411,8 +414,11 @@ export class ArtifactsRepoStore implements RepoStore {
 }
 
 /** Stage every file under `dir` recursively, and stage deletions. */
-async function stageAll(fs: MemoryFS, dir: string): Promise<string[]> {
-  const staged: string[] = [];
+async function stageAll(
+  fs: MemoryFS,
+  dir: string,
+): Promise<{ added: string[]; removed: string[] }> {
+  const added: string[] = [];
   const desired = new Set<string>();
 
   async function walk(current: string, prefix: string): Promise<void> {
@@ -427,20 +433,22 @@ async function stageAll(fs: MemoryFS, dir: string): Promise<string[]> {
         const relative = prefix ? `${prefix}/${name}` : name;
         desired.add(relative);
         await git.add({ fs, dir, filepath: relative });
-        staged.push(relative);
+        added.push(relative);
       }
     }
   }
   await walk(dir, "");
 
   // Stage removal of tracked files no longer present in the tree.
+  const removed: string[] = [];
   const tracked = await git.listFiles({ fs, dir });
   for (const path of tracked) {
     if (!desired.has(path)) {
       await git.remove({ fs, dir, filepath: path });
+      removed.push(path);
     }
   }
-  return staged;
+  return { added, removed };
 }
 
 /** Replace the working tree under `dir` with exactly `files`. */

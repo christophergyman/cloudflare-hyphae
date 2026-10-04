@@ -56,3 +56,25 @@ describe("CheckpointScheduler", () => {
     expect(s.force()).toEqual({ reason: "manual" });
   });
 });
+
+describe("CheckpointScheduler: change during commit", () => {
+  it("stays pending when a change lands mid-commit", () => {
+    const s = new CheckpointScheduler({ quietMs: 30_000, ceilingMs: 300_000 });
+    s.onChange(0);
+    const gen = s.generation;
+    expect(s.due(30_000)).toEqual({ reason: "quiet" });
+    // A change arrives while the commit is in flight.
+    s.onChange(30_050);
+    s.onCommitted(gen);
+    expect(s.hasPending).toBe(true);
+    expect(s.due(60_100)).toEqual({ reason: "quiet" });
+  });
+
+  it("returns to idle when nothing changed during the commit", () => {
+    const s = new CheckpointScheduler({ quietMs: 1_000, ceilingMs: 60_000 });
+    s.onChange(0);
+    const gen = s.generation;
+    s.onCommitted(gen);
+    expect(s.hasPending).toBe(false);
+  });
+});

@@ -194,3 +194,32 @@ async function sha256Bytes(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", copy);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+describe("HubCore: stale agent resolution", () => {
+  it("does not overwrite a newer concurrent update", async () => {
+    const core = new HubCore({ repoId: "r" });
+    const store = blobs({});
+    const B = await store.put("base\n");
+    await core.apply(change({ id: "c1", path: "f", baseHash: null, newHash: B }), store.reader);
+
+    // A concurrent client advances current to Y.
+    const Y = await store.put("Y\n");
+    await core.apply(change({ id: "c2", path: "f", baseHash: B, newHash: Y }), store.reader);
+
+    // The agent resolves an older conflict (theirs was B), producing M.
+    const M = await store.put("M\n");
+    const entry = core.applyResolution("f", M, B, "agent", 5);
+    // Y must survive; the stale resolution is ignored.
+    expect(entry?.blobHash).toBe(Y);
+  });
+
+  it("applies a resolution when the file has not moved", async () => {
+    const core = new HubCore({ repoId: "r" });
+    const store = blobs({});
+    const B = await store.put("base\n");
+    await core.apply(change({ id: "c1", path: "f", baseHash: null, newHash: B }), store.reader);
+    const M = await store.put("M\n");
+    const entry = core.applyResolution("f", M, B, "agent", 5);
+    expect(entry?.blobHash).toBe(M);
+  });
+});

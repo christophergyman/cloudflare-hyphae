@@ -69,7 +69,7 @@ describe("MergeAgent", () => {
 
   it("keeps both when tests fail", async () => {
     const a = agent({
-      resolve: async () => ({ content: "a\nBROKEN\nc\n" }),
+      resolve: async () => ({ content: "a\nBROKEN\nc\n", confidence: 0.9 }),
       verify: async () => ({ green: false, output: "3 failing tests" }),
     });
     const out = await a.resolve(input);
@@ -91,7 +91,7 @@ describe("MergeAgent", () => {
 
   it("keeps both when verification throws", async () => {
     const a = agent({
-      resolve: async () => ({ content: "a\nX\nc\n" }),
+      resolve: async () => ({ content: "a\nX\nc\n", confidence: 0.9 }),
       verify: async () => {
         throw new Error("sandbox crashed");
       },
@@ -104,7 +104,7 @@ describe("MergeAgent", () => {
   it("passes the detected test command to the verifier", async () => {
     let seen = "";
     const a = new MergeAgent({
-      model: { resolve: async () => ({ content: "ok" }) },
+      model: { resolve: async () => ({ content: "ok", confidence: 0.9 }) },
       verifier: {
         verify: async (v) => {
           seen = v.command;
@@ -152,5 +152,20 @@ describe("detectTestCommand", () => {
 
   it("falls back when nothing is provided", () => {
     expect(detectTestCommand({})).toEqual({ command: "npm test", source: "fallback" });
+  });
+});
+
+describe("MergeAgent: unsafe model output", () => {
+  it("keeps both when the model returns empty content", async () => {
+    const a = agent({ resolve: async () => ({ content: "   ", confidence: 0.99 }), verify: green });
+    const out = await a.resolve(input);
+    expect(out.status).toBe("kept-both");
+    if (out.status === "kept-both") expect(out.reason).toContain("empty");
+  });
+
+  it("treats a missing confidence as untrustworthy", async () => {
+    const a = agent({ resolve: async () => ({ content: "a\nX\nc\n" }), verify: green });
+    const out = await a.resolve(input);
+    expect(out.status).toBe("kept-both");
   });
 });

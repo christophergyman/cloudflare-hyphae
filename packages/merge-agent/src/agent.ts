@@ -94,8 +94,16 @@ export class MergeAgent {
     if (resolution.content === null || resolution.content === undefined) {
       return this.keepBoth(input, "model abstained");
     }
-    if (resolution.confidence !== undefined && resolution.confidence < this.minConfidence) {
-      return this.keepBoth(input, `model confidence ${resolution.confidence} below threshold`);
+    // An empty or whitespace-only merge would destroy both sides. Treat it as
+    // an abstention, never as a valid result.
+    if (resolution.content.trim().length === 0) {
+      return this.keepBoth(input, "model returned empty content");
+    }
+    // Enforce a confidence floor. A missing confidence is treated as
+    // untrustworthy rather than trusted, so the default is to keep both.
+    const confidence = resolution.confidence ?? 0;
+    if (confidence < this.minConfidence) {
+      return this.keepBoth(input, `model confidence ${confidence} below threshold`);
     }
 
     let verified: VerifyResult;

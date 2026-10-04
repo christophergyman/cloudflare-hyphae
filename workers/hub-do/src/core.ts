@@ -175,13 +175,24 @@ export class HubCore {
     return { status: "conflict", conflict };
   }
 
-  /** Record a resolved conflict (after the merging agent or a keep-both). */
+  /**
+   * Record a resolved conflict (after the merging agent), but only if the
+   * manifest has not moved on since the conflict was detected. This prevents a
+   * stale resolution from overwriting a newer concurrent update (lost update).
+   */
   applyResolution(
     path: string,
     newHash: string | null,
+    expectedTheirsHash: string | null,
     actorId: string,
     ts: number,
   ): ManifestEntry | undefined {
+    const current = this.manifest.get(path)?.blobHash ?? null;
+    if (current !== expectedTheirsHash) {
+      // The file changed while the agent was working. Do not clobber it.
+      this.metrics.write({ index: this.repoId, blobs: ["merge", "stale-resolution", path] });
+      return this.manifest.get(path);
+    }
     return this.accept({ path, actorId, ts } as Change, newHash);
   }
 

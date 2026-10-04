@@ -59,17 +59,28 @@ export class ChangeDetector {
   }
 
   /**
-   * Record a hash this client just wrote, so the watcher ignores the resulting
-   * event (echo suppression). Called by the sync layer after applying a remote
-   * or merged change.
+   * Record a write this client made for a path, so the watcher ignores the
+   * resulting event (echo suppression). Keyed by path AND hash: identical
+   * content on a different path is a real change and must not be suppressed
+   * (empty files all share one hash).
    */
-  noteOwnWrite(hash: string): void {
-    this.ownWrites.add(hash);
-    // Bound the set so it cannot grow forever.
+  noteOwnWrite(path: string, hash: string): void {
+    const key = `${path}\0${hash}`;
+    this.ownWrites.add(key);
     if (this.ownWrites.size > 1024) {
       const first = this.ownWrites.values().next().value;
       if (first !== undefined) this.ownWrites.delete(first);
     }
+  }
+
+  /** True if this path+hash is a write we made and are waiting to see echoed. */
+  private isOwnWrite(path: string, hash: string): boolean {
+    return this.ownWrites.has(`${path}\0${hash}`);
+  }
+
+  /** Clear a pending own-write once its echo has been observed. */
+  private consumeOwnWrite(path: string, hash: string): void {
+    this.ownWrites.delete(`${path}\0${hash}`);
   }
 
   /** Update the known-synced hash for a path (after a successful sync). */
@@ -112,8 +123,11 @@ export class ChangeDetector {
         continue;
       }
       const hash = await this.hash(bytes);
-      // Ignore writes we made ourselves (echo).
-      if (this.ownWrites.has(hash)) continue;
+      // Ignore writes we made ourselves (echo), then stop tracking that echo.
+      if (this.isOwnWrite(path, hash)) {
+        this.consumeOwnWrite(path, hash);
+        continue;
+      }
       const known = this.synced.get(path);
       if (known === hash) continue; // no real change
       changes.push({ path, kind: known === undefined ? "add" : "update", content: bytes });
