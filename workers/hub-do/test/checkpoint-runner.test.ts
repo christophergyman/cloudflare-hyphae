@@ -52,6 +52,55 @@ describe("runCheckpoint", () => {
     expect(res.missing).toEqual(["a.txt"]);
   });
 
+  it("reads blobs with bounded concurrency and preserves entry order", async () => {
+    const store = new MemoryRepoStore();
+    await store.createRepo("demo");
+
+    const total = 40;
+    const entries: Record<string, ManifestEntry> = {};
+    const blobs = new Map<string, Uint8Array>();
+    for (let i = 0; i < total; i++) {
+      const path = `f${String(i).padStart(2, "0")}.txt`;
+      const bytes = new TextEncoder().encode(`content ${i}`);
+      const hash = await sha256Hex(bytes);
+      blobs.set(hash, bytes);
+      entries[path] = { blobHash: hash, version: 1, updatedBy: "a", updatedAt: 1 };
+    }
+
+    let active = 0;
+    let maxActive = 0;
+    const res = await runCheckpoint(store, {
+      repo: "demo",
+      entries,
+      readBlob: async (h) => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        // Yield so overlapping reads actually overlap.
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        active--;
+        return blobs.get(h) ?? null;
+      },
+    });
+
+    expect(res.fileCount).toBe(total);
+    expect(res.missing).toEqual([]);
+    // Concurrency is real but bounded.
+    expect(maxActive).toBeGreaterThan(1);
+    expect(maxActive).toBeLessThanOrEqual(16);
+  });
+
+  it("preserves entry order for missing blobs", async () => {
+    const store = new MemoryRepoStore();
+    await store.createRepo("demo");
+    const entries: Record<string, ManifestEntry> = {
+      "z.txt": { blobHash: "z", version: 1, updatedBy: "a", updatedAt: 1 },
+      "a.txt": { blobHash: "a", version: 1, updatedBy: "a", updatedAt: 1 },
+      "m.txt": { blobHash: "m", version: 1, updatedBy: "a", updatedAt: 1 },
+    };
+    const res = await runCheckpoint(store, { repo: "demo", entries, readBlob: async () => null });
+    expect(res.missing).toEqual(["z.txt", "a.txt", "m.txt"]);
+  });
+
   it("writes commits in deterministic path order", async () => {
     const store = new MemoryRepoStore();
     await store.createRepo("demo");

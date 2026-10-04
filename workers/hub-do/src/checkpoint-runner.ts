@@ -38,13 +38,27 @@ export async function runCheckpoint(
   const missing: string[] = [];
   const files: { path: string; content: Uint8Array }[] = [];
 
-  for (const [path, entry] of Object.entries(input.entries)) {
-    const content = await input.readBlob(entry.blobHash);
-    if (!content) {
-      missing.push(path);
-      continue;
+  // Read blobs with bounded concurrency: a checkpoint over a large repo should
+  // not open thousands of R2 reads at once, but sequential awaits make the
+  // common case needlessly slow. Chunking keeps the in-flight count bounded and
+  // results are consumed in the original (deterministic) entry order.
+  const entries = Object.entries(input.entries);
+  const CONCURRENCY = 16;
+  for (let start = 0; start < entries.length; start += CONCURRENCY) {
+    const chunk = entries.slice(start, start + CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async ([path, entry]) => ({
+        path,
+        content: await input.readBlob(entry.blobHash),
+      })),
+    );
+    for (const { path, content } of results) {
+      if (!content) {
+        missing.push(path);
+        continue;
+      }
+      files.push({ path, content });
     }
-    files.push({ path, content });
   }
 
   // Deterministic order so commits are stable.

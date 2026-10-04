@@ -209,3 +209,72 @@ export class HubCore {
     }
   }
 }
+
+/**
+ * The minimal storage surface manifest persistence needs. It is satisfied
+ * structurally by a Durable Object's `storage` (get/put/delete/list) and by the
+ * in-memory fake used in tests, so the persistence logic is unit-testable
+ * without Cloudflare or the Agents SDK.
+ */
+export interface ManifestStorage {
+  get<T = unknown>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
+  delete(key: string): Promise<boolean>;
+  list<T = unknown>(options?: { prefix?: string }): Promise<Map<string, T>>;
+}
+
+/** Storage-key prefix for per-path manifest entries. */
+export const MANIFEST_PREFIX = "manifest:";
+
+/** The old whole-manifest key, kept only so an upgrade can migrate it. */
+export const LEGACY_MANIFEST_KEY = "manifest";
+
+/** The storage key for one path's manifest entry. */
+export function manifestKey(path: string): string {
+  return `${MANIFEST_PREFIX}${path}`;
+}
+
+/**
+ * Load the whole manifest by listing the `manifest:`-prefixed keys. Per-path
+ * keys mean a change only ever writes one entry, rather than rewriting the
+ * entire manifest on every accepted change.
+ *
+ * If no per-path entries exist but the legacy whole-manifest object does, it is
+ * migrated to per-path keys (and the old key removed) before returning, so an
+ * upgrade never drops an existing manifest.
+ */
+export async function loadManifestEntries(
+  storage: ManifestStorage,
+): Promise<Record<string, ManifestEntry>> {
+  const stored = await storage.list<ManifestEntry>({ prefix: MANIFEST_PREFIX });
+  const entries: Record<string, ManifestEntry> = {};
+  for (const [key, entry] of stored) {
+    if (!key.startsWith(MANIFEST_PREFIX)) continue;
+    entries[key.slice(MANIFEST_PREFIX.length)] = entry;
+  }
+  if (Object.keys(entries).length > 0) return entries;
+
+  const legacy = await storage.get<Record<string, ManifestEntry>>(LEGACY_MANIFEST_KEY);
+  if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)) return entries;
+  for (const [path, entry] of Object.entries(legacy)) {
+    await storage.put(manifestKey(path), entry);
+  }
+  await storage.delete(LEGACY_MANIFEST_KEY);
+  return legacy;
+}
+
+/**
+ * Persist one path's manifest entry. A tombstone (no entry) deletes the key so
+ * a deleted path does not linger and get resurrected on the next load.
+ */
+export async function persistManifestEntry(
+  storage: ManifestStorage,
+  path: string,
+  entry: ManifestEntry | undefined,
+): Promise<void> {
+  if (entry === undefined) {
+    await storage.delete(manifestKey(path));
+    return;
+  }
+  await storage.put(manifestKey(path), entry);
+}

@@ -87,8 +87,15 @@ function tokenSecret(token: string | ArtifactsToken): string {
  */
 export class ArtifactsRepoStore implements RepoStore {
   private readonly remotes = new Map<string, string>();
-  /** The working fs+dir from the last write, so reads can see pushed objects. */
-  private readonly worktrees = new Map<string, { fs: MemoryFS; dir: string }>();
+  /**
+   * The working fs+dir from the last write, so reads can see pushed objects.
+   * `head` is the commit the worktree is known to be at, used to decide whether
+   * a later write can reuse it instead of cloning again.
+   */
+  private readonly worktrees = new Map<
+    string,
+    { fs: MemoryFS; dir: string; head: CommitHash | null }
+  >();
   private readonly username: string;
   private readonly tokenTtl: number;
 
@@ -141,6 +148,16 @@ export class ArtifactsRepoStore implements RepoStore {
     const remote = await this.remoteFor(repo);
     const password = await this.writeToken(repo);
     const existingRef = parent ?? (await this.remoteHead(remote, password));
+
+    // Reuse the cached worktree when it is already at the parent commit. This
+    // avoids a full clone + full-tree rewrite + re-add of every file on each
+    // checkpoint; only changed paths are written and staged. A stale or absent
+    // worktree falls back to the clone/init path below.
+    const cached = this.worktrees.get(repo);
+    if (existingRef && cached && cached.head === existingRef) {
+      return this.commitInPlace(cached, files, message, author, remote, password, existingRef);
+    }
+
     const dir = `/repos/${repo}-${crypto.randomUUID().slice(0, 8)}`;
     const fs = new MemoryFS();
 
@@ -168,6 +185,7 @@ export class ArtifactsRepoStore implements RepoStore {
     const staged = await stageAll(fs, dir);
     // A commit is only a no-op when the tree is empty AND nothing was removed.
     if (staged.added.length === 0 && staged.removed.length === 0 && existingRef) {
+      this.worktrees.set(repo, { fs, dir, head: existingRef });
       return existingRef;
     }
     const commit = await git.commit({
@@ -187,7 +205,66 @@ export class ArtifactsRepoStore implements RepoStore {
       onAuth: () => ({ username: this.username, password }),
     });
 
-    this.worktrees.set(repo, { fs, dir });
+    this.worktrees.set(repo, { fs, dir, head: commit });
+    return commit;
+  }
+
+  /**
+   * Commit `files` into an existing worktree, writing and staging only paths
+   * whose content actually changed and staging deletions for paths that are
+   * gone. The worktree must already be at `parentRef` (checked by the caller).
+   */
+  private async commitInPlace(
+    worktree: { fs: MemoryFS; dir: string; head: CommitHash | null },
+    files: TreeFile[],
+    message: string,
+    author: CommitAuthor,
+    remote: string,
+    password: string,
+    parentRef: CommitHash,
+  ): Promise<CommitHash> {
+    const { fs, dir } = worktree;
+    const desired = new Map(files.map((file) => [file.path, file.content]));
+
+    // Stage deletions for tracked files no longer in the desired tree.
+    const removed: string[] = [];
+    const tracked = await git.listFiles({ fs, dir });
+    for (const path of tracked) {
+      if (desired.has(path)) continue;
+      await fs.promises.unlink(`${dir}/${path}`).catch(() => {});
+      await git.remove({ fs, dir, filepath: path });
+      removed.push(path);
+    }
+
+    // Write and stage only files whose bytes differ from the working tree.
+    const changed: string[] = [];
+    for (const [path, content] of desired) {
+      if (await fileMatches(fs, `${dir}/${path}`, content)) continue;
+      await fs.promises.writeFile(`${dir}/${path}`, content);
+      await git.add({ fs, dir, filepath: path });
+      changed.push(path);
+    }
+
+    if (changed.length === 0 && removed.length === 0) return parentRef;
+
+    const commit = await git.commit({
+      fs,
+      dir,
+      message,
+      author: { name: author.name, email: author.email, timestamp: author.timestamp },
+    });
+
+    await git.push({
+      fs,
+      http,
+      dir,
+      url: remote,
+      ref: "main",
+      force: false,
+      onAuth: () => ({ username: this.username, password }),
+    });
+
+    worktree.head = commit;
     return commit;
   }
 
@@ -195,7 +272,9 @@ export class ArtifactsRepoStore implements RepoStore {
    * Return a filesystem that contains the repo's history, cloning from the
    * remote if we do not already have a worktree from a recent write.
    */
-  private async fsFor(repo: string): Promise<{ fs: MemoryFS; dir: string }> {
+  private async fsFor(
+    repo: string,
+  ): Promise<{ fs: MemoryFS; dir: string; head: CommitHash | null }> {
     const cached = this.worktrees.get(repo);
     if (cached) return cached;
 
@@ -213,8 +292,15 @@ export class ArtifactsRepoStore implements RepoStore {
       depth: 1,
       onAuth: () => ({ username: this.username, password }),
     });
-    this.worktrees.set(repo, { fs, dir });
-    return { fs, dir };
+    let head: CommitHash | null = null;
+    try {
+      head = await git.resolveRef({ fs, dir, ref: "main" });
+    } catch (err) {
+      if (!isMissingRefError(err)) throw err;
+    }
+    const entry = { fs, dir, head };
+    this.worktrees.set(repo, entry);
+    return entry;
   }
 
   /** The current `main` object id on the remote, or null if the repo is empty. */
@@ -313,6 +399,21 @@ async function stageAll(
     }
   }
   return { added, removed };
+}
+
+/** True when the file at `path` already has exactly the bytes of `content`. */
+async function fileMatches(fs: MemoryFS, path: string, content: Uint8Array): Promise<boolean> {
+  try {
+    const existing = await fs.promises.readFile(path);
+    const bytes = typeof existing === "string" ? new TextEncoder().encode(existing) : existing;
+    if (bytes.byteLength !== content.byteLength) return false;
+    for (let i = 0; i < bytes.byteLength; i++) {
+      if (bytes[i] !== content[i]) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Replace the working tree under `dir` with exactly `files`. */

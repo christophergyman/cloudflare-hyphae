@@ -21,7 +21,14 @@ import { ArtifactsRepoStore } from "@hyphae/repostore";
 import { Agent } from "agents";
 import { CheckpointScheduler } from "./checkpoint.ts";
 import { runCheckpoint } from "./checkpoint-runner.ts";
-import { type ApplyResult, type BlobReader, HubCore, type HubCoreOptions } from "./core.ts";
+import {
+  type ApplyResult,
+  type BlobReader,
+  HubCore,
+  type HubCoreOptions,
+  loadManifestEntries,
+  persistManifestEntry,
+} from "./core.ts";
 import { base64ToBytes, isAlreadyExistsError, parseClientMessageSafe } from "./helpers.ts";
 import { HistoryFeed } from "./history.ts";
 
@@ -79,8 +86,6 @@ export interface ConnectionState {
   /** A read-only participant (the live view); does not count as an editor. */
   observer?: boolean;
 }
-
-const MANIFEST_KEY = "manifest";
 
 export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc {
   private core: HubCore | null = null;
@@ -179,13 +184,17 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
 
   private async loadManifest(): Promise<void> {
     const core = this.ensureCore();
-    const stored = await this.ctx.storage.get<Record<string, ManifestEntry>>(MANIFEST_KEY);
-    if (stored) core.hydrate(stored);
+    const stored = await loadManifestEntries(this.ctx.storage);
+    if (Object.keys(stored).length > 0) core.hydrate(stored);
   }
 
-  private async persistManifest(): Promise<void> {
-    const core = this.ensureCore();
-    await this.ctx.storage.put(MANIFEST_KEY, core.manifestEntries());
+  /**
+   * Persist a single path's manifest entry (or delete its key on a tombstone).
+   * Per-path writes keep each accepted change O(1) in the manifest size instead
+   * of rewriting the whole manifest object.
+   */
+  private async persistManifest(path: string, entry: ManifestEntry | undefined): Promise<void> {
+    await persistManifestEntry(this.ctx.storage, path, entry);
   }
 
   private blobReader(): BlobReader {
@@ -322,7 +331,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
         const hash = result.entry?.blobHash;
         if (hash) await this.env.BLOBS?.put(hash, result.mergedContent);
       }
-      await this.persistManifest();
+      await this.persistManifest(change.path, result.entry);
       await this.history.record({
         kind: result.mergedContent ? "merge" : "change",
         path: change.path,
@@ -433,7 +442,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     );
     // If the resolution was stale (the file moved on), do not broadcast it.
     if (entry?.blobHash !== hash) return;
-    await this.persistManifest();
+    await this.persistManifest(change.path, entry);
     await this.history.record({
       kind: "resolved",
       path: change.path,

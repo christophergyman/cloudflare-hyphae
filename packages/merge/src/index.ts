@@ -40,8 +40,10 @@ export interface MergeConflict {
 export type MergeResult = MergeClean | MergeConflict;
 
 /**
- * Safety ceiling on file size (in lines). Myers is memory-bounded by the edit
- * distance, not n*m, so this is a very high guard against pathological inputs,
+ * Safety ceiling on file size (in lines). Myers runs in O(ND) time and keeps a
+ * snapshot of the frontier at each d for backtracking, so peak memory is
+ * O(D*(n+m)): bounded by the edit distance rather than n*m, but still
+ * proportional to it. This is a very high guard against pathological inputs,
  * not a normal limit. Files up to this size merge in the fast path.
  */
 const MAX_LINES = 200_000;
@@ -74,10 +76,12 @@ function sameStrings(a: string[], b: string[]): boolean {
 /**
  * A line diff (base -> other) as a list of hunks.
  *
- * Uses Myers' O(ND) diff, where D is the number of differences. Real merges
- * have few changes relative to file size, so this is near-linear and, unlike an
- * LCS table, does not allocate O(n*m) memory. That is what lets large files
- * merge cleanly instead of falling back to a whole-file conflict.
+ * Uses Myers' O(ND) diff, where D is the number of differences. Time is
+ * near-linear for real merges (few changes relative to file size), and unlike an
+ * LCS table it does not allocate O(n*m) memory. Backtracking keeps a snapshot of
+ * the frontier at each d, so peak memory is O(D*(n+m)): bounded by the edit
+ * distance, but still proportional to it. That is what lets large files with
+ * small edits merge cleanly instead of falling back to a whole-file conflict.
  *
  * Hunks are non-overlapping and ordered by baseStart. Insertions have
  * baseStart === baseEnd.
@@ -193,20 +197,6 @@ function diffHunks(base: string[], other: string[]): Hunk[] {
   return hunks;
 }
 
-/**
- * Two hunks compete when their base ranges intersect. Pure insertions (empty
- * range) compete when they target the same anchor, and also when one insertion
- * targets an anchor strictly inside the other's replaced range.
- */
-function hunksCompete(a: Hunk, b: Hunk): boolean {
-  const aInsertion = a.baseStart === a.baseEnd;
-  const bInsertion = b.baseStart === b.baseEnd;
-  if (aInsertion && bInsertion) return a.baseStart === b.baseStart;
-  if (aInsertion) return a.baseStart >= b.baseStart && a.baseStart <= b.baseEnd;
-  if (bInsertion) return b.baseStart >= a.baseStart && b.baseStart <= a.baseEnd;
-  return a.baseStart < b.baseEnd && b.baseStart < a.baseEnd;
-}
-
 interface Chunk {
   baseStart: number;
   baseEnd: number;
@@ -215,10 +205,76 @@ interface Chunk {
 }
 
 /**
+ * Running summary of a chunk's base span, used to test whether the next hunk
+ * competes without rescanning every hunk already in the chunk.
+ *
+ * `lo`/`hi` are the min baseStart / max baseEnd seen. `hasRange` is true once a
+ * non-insertion (baseStart < baseEnd) is present; the ranges in a chunk are
+ * always contiguous (each absorbed hunk competes with the union, so no gap can
+ * form). `insLo`/`insHi` record whether an insertion sits exactly on the span's
+ * start/end, because such an insertion competes with a hunk that touches the
+ * boundary even when their half-open ranges do not intersect.
+ */
+interface ChunkState {
+  lo: number;
+  hi: number;
+  hasRange: boolean;
+  insLo: boolean;
+  insHi: boolean;
+}
+
+/**
+ * Whether `h` competes with the base span summarized by `s`.
+ *
+ * Because a chunk's ranges stay contiguous, intersecting the summary span is
+ * equivalent to intersecting at least one member range; insertions only need
+ * the boundary flags above.
+ */
+function competesWithChunk(h: Hunk, s: ChunkState): boolean {
+  const insertion = h.baseStart === h.baseEnd;
+  if (insertion) {
+    // An insertion competes with a range containing its anchor (inclusive), or
+    // with another insertion at the exact same anchor.
+    if (s.hasRange) return h.baseStart >= s.lo && h.baseStart <= s.hi;
+    return h.baseStart === s.lo;
+  }
+  if (s.hasRange) {
+    if (h.baseStart < s.hi && s.lo < h.baseEnd) return true;
+    if (s.insLo && h.baseEnd === s.lo && h.baseStart <= s.lo) return true;
+    if (s.insHi && h.baseStart === s.hi && h.baseEnd >= s.hi) return true;
+    return false;
+  }
+  // Only insertions so far, all at the same anchor: the new range competes iff
+  // it contains that anchor.
+  return h.baseStart <= s.lo && s.lo <= h.baseEnd;
+}
+
+/** Fold an absorbed hunk into the running chunk summary. O(1). */
+function absorbIntoChunk(s: ChunkState, h: Hunk): void {
+  const insertion = h.baseStart === h.baseEnd;
+  const prevLo = s.lo;
+  const prevHi = s.hi;
+  s.lo = Math.min(s.lo, h.baseStart);
+  s.hi = Math.max(s.hi, h.baseEnd);
+  // A boundary insertion only stays relevant if the boundary did not move.
+  if (s.lo !== prevLo) s.insLo = false;
+  if (s.hi !== prevHi) s.insHi = false;
+  if (insertion) {
+    if (h.baseStart === s.lo) s.insLo = true;
+    if (h.baseStart === s.hi) s.insHi = true;
+  } else {
+    s.hasRange = true;
+  }
+}
+
+/**
  * Walk both hunk lists in base order and build chunks. A chunk grows while the
  * next hunk (from either side, whichever comes first) competes with or touches
  * a hunk already in the chunk. This is the minimal set of base regions the two
  * sides disagree about.
+ *
+ * Each hunk is considered at most a constant number of times, so building a
+ * chunk with k hunks is O(k) rather than O(k^2).
  */
 function buildChunks(ours: Hunk[], theirs: Hunk[]): Chunk[] {
   const chunks: Chunk[] = [];
@@ -238,6 +294,13 @@ function buildChunks(ours: Hunk[], theirs: Hunk[]): Chunk[] {
       ours: [],
       theirs: [],
     };
+    const state: ChunkState = {
+      lo: seed.baseStart,
+      hi: seed.baseEnd,
+      hasRange: seed.baseStart < seed.baseEnd,
+      insLo: seed.baseStart === seed.baseEnd,
+      insHi: seed.baseStart === seed.baseEnd,
+    };
     if (ohFirst) {
       chunk.ours.push(oh as Hunk);
       oi++;
@@ -255,8 +318,7 @@ function buildChunks(ours: Hunk[], theirs: Hunk[]): Chunk[] {
 
       const consider = (h: Hunk | null, side: "ours" | "theirs"): void => {
         if (!h) return;
-        const competes = [...chunk.ours, ...chunk.theirs].some((c) => hunksCompete(c, h));
-        if (!competes) return;
+        if (!competesWithChunk(h, state)) return;
         if (side === "ours") {
           chunk.ours.push(h);
           oi++;
@@ -264,7 +326,7 @@ function buildChunks(ours: Hunk[], theirs: Hunk[]): Chunk[] {
           chunk.theirs.push(h);
           ti++;
         }
-        chunk.baseEnd = Math.max(chunk.baseEnd, h.baseEnd);
+        absorbIntoChunk(state, h);
         grew = true;
       };
 
@@ -272,6 +334,8 @@ function buildChunks(ours: Hunk[], theirs: Hunk[]): Chunk[] {
       consider(ti < theirs.length ? (theirs[ti] as Hunk) : null, "theirs");
     }
 
+    chunk.baseStart = state.lo;
+    chunk.baseEnd = state.hi;
     chunks.push(chunk);
   }
   return chunks;

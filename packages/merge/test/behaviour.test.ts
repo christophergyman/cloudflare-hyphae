@@ -64,6 +64,24 @@ describe("mergeFile: git-aligned behaviour", () => {
     expect(r.clean).toBe(true);
     if (r.clean) expect(r.content).toBe("a\nX\nb\na2\nc\nc2\n");
   });
+
+  it("groups multiple competing hunks into one chunk (insertions inside a replaced range)", () => {
+    // theirs replaces base lines 2..7 with "T"; ours inserts a line at each of
+    // anchors 2, 4, and 6, which all fall inside theirs' replaced range. All
+    // four hunks belong to a single chunk, so the chunk builder must absorb
+    // them incrementally rather than rescanning.
+    const base = `${Array.from({ length: 10 }, (_, i) => `l${i}`).join("\n")}\n`;
+    const ours = "l0\nl1\nO2\nl2\nl3\nO4\nl4\nl5\nO6\nl6\nl7\nl8\nl9\n";
+    const theirs = "l0\nl1\nT\nl7\nl8\nl9\n";
+    const r = mergeFile(base, ours, theirs);
+    expect(r.clean).toBe(false);
+    if (!r.clean) {
+      // A single conflict region covering the whole contested span.
+      expect(r.regions.length).toBe(1);
+      expect(r.content).toContain("<<<<<<< ours");
+      expect(r.content).toContain(">>>>>>> theirs");
+    }
+  });
 });
 
 describe("mergeFile: no dropped or duplicated base lines", () => {
