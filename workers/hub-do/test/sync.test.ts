@@ -27,9 +27,6 @@ class SharedBlobs {
     const text = this.map.get(hash);
     return text === undefined ? null : new TextEncoder().encode(text);
   };
-  text(hash: string): string | undefined {
-    return this.map.get(hash);
-  }
 }
 
 function commit(core: HubCore, blobs: SharedBlobs, client: Client, path: string, content: string) {

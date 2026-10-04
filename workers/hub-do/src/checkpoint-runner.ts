@@ -11,13 +11,12 @@
 
 import type { ManifestEntry } from "@hyphae/core";
 import type { RepoStore } from "@hyphae/repostore";
-
-export type CheckpointBlobReader = (hash: string) => Promise<Uint8Array | null>;
+import type { BlobReader } from "./core.ts";
 
 export interface CheckpointInput {
   repo: string;
   entries: Record<string, ManifestEntry>;
-  readBlob: CheckpointBlobReader;
+  readBlob: BlobReader;
   message?: string;
   author?: { name: string; email: string };
 }

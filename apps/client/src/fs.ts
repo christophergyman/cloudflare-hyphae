@@ -29,10 +29,6 @@ export class NodeFileSystem implements FileSystemPort {
   async unlink(path: string): Promise<void> {
     await rm(path, { force: true });
   }
-
-  async list(): Promise<string[]> {
-    return [];
-  }
 }
 
 /** In-memory filesystem for tests. */
@@ -55,9 +51,5 @@ export class MemoryFileSystem implements FileSystemPort {
 
   async unlink(path: string): Promise<void> {
     this.files.delete(path);
-  }
-
-  async list(): Promise<string[]> {
-    return [...this.files.keys()];
   }
 }

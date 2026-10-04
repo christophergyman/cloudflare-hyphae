@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import { sha256Hex } from "@hyphae/core";
 import {
   defaultConflictMarkers,
   MergeAgent,
@@ -10,7 +9,7 @@ import {
 /**
  * Proves the full verified-merge decision flow end to end, the way the Hub's
  * MergeRunner drives it: a conflict goes to the model, the sandbox runs tests,
- * and only a green result is accepted. This is the Phase 5 hero path.
+ * and only a green result is accepted.
  */
 
 function buildAgent(modelContent: string | null, green: boolean, confidence?: number) {
@@ -50,16 +49,6 @@ describe("verified merge flow", () => {
     expect(out.status).toBe("kept-both");
     if (out.status === "kept-both") {
       expect(out.conflictMarkers).toContain("<<<<<<< ours");
-    }
-  });
-
-  it("computes a stable hash for the merged content", async () => {
-    const agent = buildAgent("merged\n", true);
-    const out = await agent.resolve({ path: "f", base: "", ours: "a", theirs: "b" });
-    if (out.status === "merged") {
-      const h1 = await sha256Hex(out.content);
-      const h2 = await sha256Hex(out.content);
-      expect(h1).toBe(h2);
     }
   });
 });

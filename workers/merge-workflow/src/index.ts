@@ -19,6 +19,5 @@ export type {
   ConflictJob,
   MergeWorkflowEnv,
   MergeWorkflowResult,
-  RunnerEnv,
 } from "./runner.ts";
 export { makeMergeRunner, runConflictJob } from "./runner.ts";

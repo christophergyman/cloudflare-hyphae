@@ -43,7 +43,6 @@ export interface FileSystemPort {
   readFile(path: string): Promise<Uint8Array | null>;
   writeFileAtomic(path: string, bytes: Uint8Array): Promise<void>;
   unlink(path: string): Promise<void>;
-  list(): Promise<string[]>;
 }
 
 /**

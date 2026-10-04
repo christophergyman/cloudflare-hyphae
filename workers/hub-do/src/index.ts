@@ -151,20 +151,11 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     if (this.env.MERGE) return this.env.MERGE;
     const ai = this.env.AI;
     if (!ai) return null;
-    const runner = createMergeRunner({
-      ai: { run: (model, options) => ai.run(model, options) },
+    return createMergeRunner({
+      ai,
       model: this.env.MODEL,
       testCommand: this.env.TEST_COMMAND,
     });
-    return {
-      async run(job) {
-        const outcome = await runner.run(job);
-        if (outcome.status === "merged") {
-          return { status: "merged", content: outcome.content, verified: outcome.verified };
-        }
-        return { status: "kept-both", reason: outcome.reason };
-      },
-    };
   }
 
   private ensureCore(): HubCore {
@@ -273,7 +264,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
       return;
     }
     if (msg.type === "change") {
-      await this.handleChange(connection, msg, result.raw);
+      await this.handleChange(connection, msg);
     }
   }
 
@@ -286,7 +277,6 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
       newHash?: string | null;
       contentBase64?: string;
     },
-    _raw: unknown,
   ): Promise<void> {
     const core = this.ensureCore();
     const state = connection.state as ConnectionState | null;
@@ -457,21 +447,26 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
    */
   private async noteChangeForCheckpoint(): Promise<void> {
     this.checkpoints.onChange(Date.now());
+    await this.armCheckpointAlarm();
+  }
+
+  /**
+   * Arm the alarm for the next due checkpoint, if any. Setting it again simply
+   * moves it. Surface a failure rather than dropping it: a lost alarm means
+   * changes never become durable.
+   */
+  private async armCheckpointAlarm(): Promise<void> {
     const next = this.checkpoints.nextCheckAt();
-    if (next !== null) {
-      // Arm the alarm. Setting it again simply moves it; the alarm handler
-      // re-arms if changes keep arriving before the ceiling. Surface a failure
-      // rather than dropping it: a lost alarm means changes never become durable.
-      try {
-        await this.ctx.storage.setAlarm(next);
-      } catch (err) {
-        await this.history.record({
-          kind: "change",
-          by: "hub",
-          detail: `alarm failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
-          at: Date.now(),
-        });
-      }
+    if (next === null) return;
+    try {
+      await this.ctx.storage.setAlarm(next);
+    } catch (err) {
+      await this.history.record({
+        kind: "change",
+        by: "hub",
+        detail: `alarm failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
+        at: Date.now(),
+      });
     }
   }
 
@@ -479,40 +474,28 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
   override async alarm(): Promise<void> {
     await super.alarm();
     await this.maybeCheckpoint();
-    await this.rearmCheckpointAlarm();
+    await this.armCheckpointAlarm();
   }
 
   /** Commit to durable history if the scheduler says it is due. */
   private async maybeCheckpoint(): Promise<void> {
-    const store = this.repoStore();
-    if (!store) return; // no durable store configured
     const decision = this.checkpoints.due(Date.now());
     if (!decision) return;
-
-    const generation = this.checkpoints.generation;
-    const core = this.ensureCore();
-    await this.ensureRepo(STORE_REPO, store);
-    const result = await runCheckpoint(store, {
-      repo: STORE_REPO,
-      entries: core.manifestEntries(),
-      readBlob: this.blobReader(),
-      message: `checkpoint (${decision.reason})`,
-    });
-
-    if (result.missing.length > 0) {
-      // Some content could not be read, so the durable commit is incomplete.
-      // Stay pending rather than marking the checkpoint done, so it retries.
-      return;
-    }
-    // A change that landed mid-commit keeps the scheduler pending.
-    this.checkpoints.onCommitted(generation);
+    await this.commitCheckpoint(`checkpoint (${decision.reason})`);
   }
 
   /** Public method: force a checkpoint now (manual trigger, ADR-006). */
   async checkpoint(): Promise<{ committed: boolean }> {
+    return this.commitCheckpoint("checkpoint (manual)");
+  }
+
+  /**
+   * Commit the current manifest to durable history. If some content cannot be
+   * read the commit is incomplete, so the scheduler stays pending to retry.
+   */
+  private async commitCheckpoint(message: string): Promise<{ committed: boolean }> {
     const store = this.repoStore();
     if (!store) return { committed: false };
-    // A manual checkpoint commits the current state regardless of timing.
     const generation = this.checkpoints.generation;
     const core = this.ensureCore();
     await this.ensureRepo(STORE_REPO, store);
@@ -520,18 +503,10 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
       repo: STORE_REPO,
       entries: core.manifestEntries(),
       readBlob: this.blobReader(),
-      message: "checkpoint (manual)",
+      message,
     });
     if (result.missing.length === 0) this.checkpoints.onCommitted(generation);
     return { committed: result.missing.length === 0 };
-  }
-
-  /** Re-arm the checkpoint alarm if changes are still pending. */
-  private async rearmCheckpointAlarm(): Promise<void> {
-    const next = this.checkpoints.nextCheckAt();
-    if (next !== null) {
-      await this.ctx.storage.setAlarm(next);
-    }
   }
 
   /** Public method: current manifest, for read clients (the live view). */

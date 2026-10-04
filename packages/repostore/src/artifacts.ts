@@ -50,13 +50,6 @@ export interface ArtifactsRepoStoreOptions {
 }
 
 /**
- * Normalize an Artifacts token to the bare secret used for git Basic auth.
- *
- * The workerd binding returns an object (`{ plaintext, ... }`); other paths may
- * return a string. The plaintext looks like `art_v2_<secret>?expires=<unix>`,
- * so strip the query before using it as the password.
- */
-/**
  * True when a git error means "the ref/object does not exist" (an expected,
  * empty-repo case), as opposed to a real failure. isomorphic-git tags these
  * with `code: "NotFoundError"`; HTTP 404s from the remote are treated the same.
@@ -73,6 +66,13 @@ export function isMissingRefError(err: unknown): boolean {
   return code === "HttpError" && status === 404;
 }
 
+/**
+ * Normalize an Artifacts token to the bare secret used for git Basic auth.
+ *
+ * The workerd binding returns an object (`{ plaintext, ... }`); other paths may
+ * return a string. The plaintext looks like `art_v2_<secret>?expires=<unix>`,
+ * so strip the query before using it as the password.
+ */
 function tokenSecret(token: string | ArtifactsToken): string {
   const plaintext = typeof token === "string" ? token : (token?.plaintext ?? "");
   return plaintext.split("?expires=")[0] ?? plaintext;

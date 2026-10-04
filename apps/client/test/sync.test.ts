@@ -60,7 +60,6 @@ class FakeTransport implements ClientTransport {
   readonly sent: unknown[] = [];
   private msgCb: ((m: HubMessage) => void) | null = null;
   private openCb: (() => void) | null = null;
-  private readonly connected: SyncEngine | null = null;
 
   send(msg: unknown): void {
     this.sent.push(msg);
@@ -76,9 +75,6 @@ class FakeTransport implements ClientTransport {
   }
   fire(msg: HubMessage): void {
     this.msgCb?.(msg);
-  }
-  get peer(): SyncEngine | null {
-    return this.connected;
   }
 }
 

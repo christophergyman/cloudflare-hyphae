@@ -96,12 +96,4 @@ export class CheckpointScheduler {
   get hasPending(): boolean {
     return this.state.phase === "pending";
   }
-
-  /**
-   * Force a checkpoint decision regardless of timing (manual trigger).
-   * Returns null when there is nothing pending to commit.
-   */
-  force(): { reason: "manual" } | null {
-    return this.state.phase === "pending" ? { reason: "manual" } : null;
-  }
 }

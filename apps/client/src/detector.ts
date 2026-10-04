@@ -87,11 +87,10 @@ export class ChangeDetector {
    * Feed a raw filesystem event. Events for the same path are coalesced and
    * emitted together once the debounce window closes.
    */
-  event(path: string, now: number = Date.now()): void {
+  event(path: string): void {
     this.pending.add(path);
     const existing = this.timers.get(path);
     if (existing) clearTimeout(existing);
-    void now;
     this.timers.set(
       path,
       setTimeout(() => {

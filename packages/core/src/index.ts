@@ -84,8 +84,6 @@ export interface RemovedActor {
   removedAt: number;
 }
 
-export const HYPHAE_VERSION = "0.0.0" as const;
-
 export { bytesEqual, sha256Hex, toHex } from "./hash.ts";
 export type { MetricPoint, Metrics } from "./metrics.ts";
 export { analyticsEngineMetrics, noopMetrics } from "./metrics.ts";

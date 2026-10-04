@@ -137,7 +137,7 @@ describe("HubCore: collisions", () => {
     const binB = new Uint8Array([3, 0, 4]);
     const map = new Map<string, Uint8Array>();
     const put = async (bytes: Uint8Array) => {
-      const h = await sha256Bytes(bytes);
+      const h = await sha256Hex(bytes);
       map.set(h, bytes);
       return h;
     };
@@ -187,13 +187,6 @@ describe("HubCore: manifest snapshot and hydrate", () => {
     expect(restored.manifestEntries()).toEqual(snap);
   });
 });
-
-async function sha256Bytes(bytes: Uint8Array): Promise<string> {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  const digest = await crypto.subtle.digest("SHA-256", copy);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 describe("HubCore: stale agent resolution", () => {
   it("does not overwrite a newer concurrent update", async () => {

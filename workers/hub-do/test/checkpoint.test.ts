@@ -48,13 +48,6 @@ describe("CheckpointScheduler", () => {
     // ceiling is firstChangeAt + 300_000 = 301_000, quiet is 230_000
     expect(s.nextCheckAt()).toBe(230_000);
   });
-
-  it("manual force only fires when there is something pending", () => {
-    const s = new CheckpointScheduler();
-    expect(s.force()).toBeNull();
-    s.onChange(Date.now());
-    expect(s.force()).toEqual({ reason: "manual" });
-  });
 });
 
 describe("CheckpointScheduler: change during commit", () => {

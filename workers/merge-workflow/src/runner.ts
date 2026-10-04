@@ -38,9 +38,6 @@ export interface MergeWorkflowResult {
   reason?: string;
 }
 
-/** Backwards-compatible alias used by tests and callers. */
-export type RunnerEnv = MergeWorkflowEnv;
-
 /**
  * Build a merge runner backed by the runtime bindings. A thin wrapper over the
  * shared {@link createMergeRunner}, resolving the test command once.
@@ -59,24 +56,14 @@ export function makeMergeRunner(env: MergeWorkflowEnv) {
 }
 
 /**
- * Run one conflict job end to end. Builds the shared runner with a Sandbox
- * verifier when one is configured, otherwise keeps both sides unverified.
+ * Run one conflict job end to end. Uses a Sandbox verifier when one is
+ * configured, otherwise keeps both sides unverified.
  */
 export async function runConflictJob(
   env: MergeWorkflowEnv,
   job: ConflictJob,
 ): Promise<MergeWorkflowResult> {
-  const detection = detectTestCommand({
-    configured: env.TEST_COMMAND,
-    packageJson: env.PACKAGE_JSON,
-  });
-  const runner = createMergeRunner({
-    ai: env.AI,
-    sandbox: env.Sandbox,
-    model: env.MODEL ?? DEFAULT_MERGE_MODEL,
-    testCommand: detection.command,
-  });
-
+  const runner = makeMergeRunner(env);
   const outcome = await runner.run(job);
   if (outcome.status === "merged") {
     return { status: "merged", path: job.path, content: outcome.content };

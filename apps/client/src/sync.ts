@@ -130,7 +130,7 @@ export class SyncEngine {
       const base = this.synced.get(change.path) ?? null;
       this.transport.send({
         type: "change",
-        id: randomId(),
+        id: crypto.randomUUID(),
         path: change.path,
         baseHash: base,
         newHash: null,
@@ -142,7 +142,7 @@ export class SyncEngine {
     const base = this.synced.get(change.path) ?? null;
     this.transport.send({
       type: "change",
-      id: randomId(),
+      id: crypto.randomUUID(),
       path: change.path,
       baseHash: base,
       newHash: hash,
@@ -227,10 +227,6 @@ export class SyncEngine {
   dispose(): void {
     this.detector.dispose();
   }
-}
-
-function randomId(): string {
-  return crypto.randomUUID();
 }
 
 /** Join a relative path onto the project root, without escaping it. */

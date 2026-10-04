@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { makeMergeRunner, type RunnerEnv } from "../src/runner.ts";
+import { type MergeWorkflowEnv, makeMergeRunner } from "../src/runner.ts";
 
-function env(over: Partial<RunnerEnv> = {}): RunnerEnv {
+function env(over: Partial<MergeWorkflowEnv> = {}): MergeWorkflowEnv {
   return {
     AI: {
       async run() {

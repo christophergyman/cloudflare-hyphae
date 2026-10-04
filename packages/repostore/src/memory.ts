@@ -100,11 +100,6 @@ export class MemoryRepoStore implements RepoStore {
     const blob = this.must(repo).blobs.get(hash);
     return blob ? blob.slice() : null;
   }
-
-  /** Test helper: the stored commit record, if present. */
-  peekCommit(repo: string, hash: CommitHash): StoredCommit | null {
-    return this.repos.get(repo)?.commits.get(hash) ?? null;
-  }
 }
 
 /** In-memory content-addressed blob store. */

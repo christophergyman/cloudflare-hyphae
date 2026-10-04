@@ -1,12 +1,11 @@
 /**
  * HubCore: the framework-agnostic sync authority (ADR-003, ADR-004, ADR-005).
  *
- * This is the "brain" the README describes. It owns:
- *   - the manifest (path -> current version)
- *   - collision detection via the client's baseHash
- *   - the git 3-way merge fast path (packages/merge)
- *   - conflict records, surfaced for the merging agent
- *   - dedupe of changes by id (retries must be idempotent)
+ * HubCore owns the sync decisions and holds no file bytes: it keeps the
+ * manifest (path -> current version), detects collisions via the client's
+ * baseHash, runs the git 3-way merge fast path (packages/merge), records
+ * conflicts for the merging agent, and dedupes changes by id so retries are
+ * idempotent.
  *
  * It holds no file bytes (ADR-004): callers hand it blob content only when a
  * merge is needed, and it returns decisions. Keeping it free of Durable Object

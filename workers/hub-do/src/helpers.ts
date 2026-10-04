@@ -8,11 +8,9 @@ import { parseClientMessage } from "@hyphae/protocol";
 /** Parse an incoming client message, returning a typed error instead of throwing. */
 export function parseClientMessageSafe(
   raw: unknown,
-):
-  | { ok: true; value: ReturnType<typeof parseClientMessage>; raw: unknown }
-  | { ok: false; error: string } {
+): { ok: true; value: ReturnType<typeof parseClientMessage> } | { ok: false; error: string } {
   try {
-    return { ok: true, value: parseClientMessage(raw), raw };
+    return { ok: true, value: parseClientMessage(raw) };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "invalid message" };
   }
@@ -20,14 +18,15 @@ export function parseClientMessageSafe(
 
 /**
  * True when an error means "the repo already exists", the one create failure
- * that is safe to ignore. Matches the Artifacts API's conflict signal, and any
- * message that says so, without swallowing unrelated failures.
+ * that is safe to ignore. Matches the Artifacts API's conflict signal (HTTP
+ * 409), and any message that says so, without swallowing unrelated failures
+ * such as a genuine bad request.
  */
 export function isAlreadyExistsError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const status =
     (err as { status?: unknown }).status ?? (err as { statusCode?: unknown }).statusCode;
-  if (status === 409 || status === 400) return true;
+  if (status === 409) return true;
   const message = (err as { message?: unknown }).message;
   return typeof message === "string" && /already exists|conflict/i.test(message);
 }

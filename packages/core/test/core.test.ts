@@ -12,10 +12,6 @@ describe("sha256Hex", () => {
     const bytes = new TextEncoder().encode("hello");
     expect(await sha256Hex(bytes)).toBe(await sha256Hex("hello"));
   });
-
-  it("is stable across calls", async () => {
-    expect(await sha256Hex("same")).toBe(await sha256Hex("same"));
-  });
 });
 
 describe("toHex / bytesEqual", () => {
