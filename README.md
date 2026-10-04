@@ -103,10 +103,12 @@ The Hub is the conductor, not the orchestra. It is deliberately thin: it decides
 
 ## Status
 
-- **Phase:** Phase 0 in progress. The foundation is scaffolded and shipping.
-- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`) with 34 passing tests, the edge Worker skeleton, and spike 1.
-- **Spike 1 (Artifacts write path):** isomorphic-git commit and push over smart HTTP is proven locally, including an incremental commit and a clone-back. Only the Artifacts host and token auth remain, and they need a Workers Paid account. See `spikes/artifacts-push/README.md`.
-- **Next:** the remaining Phase 0 spikes (Agents SDK Hub, `ctx.container`, R2 presign, AI Gateway, Ed25519).
+- **Phase:** Phase 2 in progress. The Hub is built and unit-tested.
+- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`) with 53 tests, the edge Worker, spike 1, and the **Hub** (`workers/hub-do`) now at 64 tests total.
+- **Hub (Phase 2):** `HubCore` is the framework-agnostic sync authority (manifest, collision detection, git 3-way merge, conflicts, idempotency) and is fully unit-tested, including two-client convergence. `Hub` is the Agents SDK `Agent` shell that speaks the protocol over WebSockets, persists the manifest in SQLite-backed DO storage, and broadcasts changes.
+- **Spike 1 (Artifacts write path):** isomorphic-git commit and push over smart HTTP proven locally, including an incremental commit and a clone-back. Only the Artifacts host and token auth remain, and they need a Workers Paid account. See `spikes/artifacts-push/README.md`.
+- **Not yet verified:** the Agents SDK WebSocket path and hibernation, R2, and the Artifacts binding need a live Cloudflare account. The Hub logic is verified locally; the transport shell is built but unrun.
+- **Next:** the client watcher (Phase 3), then checkpoints (Phase 4) and the verified merge agent (Phase 5).
 - Cloudflare Artifacts is in open beta and available on the Workers Paid plan.
 
 ---

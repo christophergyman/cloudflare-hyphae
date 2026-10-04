@@ -8,5 +8,15 @@ compatibility_flags = ["nodejs_compat"]
 binding = "BLOBS"
 bucket_name = "hyphae-blobs"
 
+# One Hub (Durable Object) per repo, built on the Agents SDK (ADR-017).
+# SQLite-backed storage is used (ADR-019).
+[[durable_objects.bindings]]
+name = "Hub"
+class_name = "Hub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hub"]
+
 [vars]
 ENVIRONMENT = "development"

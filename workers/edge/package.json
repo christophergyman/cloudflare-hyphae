@@ -3,5 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "main": "src/index.ts"
+  "main": "src/index.ts",
+  "dependencies": {
+    "@hyphae/hub": "workspace:*",
+    "agents": "^0.26.0"
+  }
 }

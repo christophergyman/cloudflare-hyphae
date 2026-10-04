@@ -35,10 +35,12 @@ Each checkpoint answers three questions:
 
 ## Build status
 
-- **Phase 0 in progress.** The foundation is shipped.
-- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`) with tests, the edge Worker skeleton, and spike 1.
+- **Phase 2 in progress.** The Hub is built and unit-tested.
+- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`) with tests, the edge Worker, spike 1, and the Hub.
+- **Hub (Phase 2):** `HubCore` (framework-agnostic sync authority) plus the Agents SDK `Agent` shell. 64 tests total, including two-client convergence and the conflict path.
 - **Spike 1 (Artifacts write path):** isomorphic-git commit and push over smart HTTP proven locally, including an incremental commit and clone-back. Only the Artifacts host and token auth remain, and they need a Workers Paid account. See `spikes/artifacts-push/README.md`.
-- **Next:** the remaining Phase 0 spikes (Agents SDK Hub, `ctx.container`, R2 presign, AI Gateway, Ed25519), then Checkpoint 0.
+- **Not yet verified:** the Agents SDK WebSocket path and hibernation, R2, and the Artifacts binding need a live Cloudflare account. The Hub logic is verified locally; the transport shell is built but unrun.
+- **Next:** the client watcher (Phase 3), then Checkpoint 0's remaining spikes and Checkpoint 2.
 
 ---
 
