@@ -83,12 +83,6 @@ export class ChangeDetector {
     this.ownWrites.delete(`${path}\0${hash}`);
   }
 
-  /** Update the known-synced hash for a path (after a successful sync). */
-  markSynced(path: string, hash: string | null): void {
-    if (hash === null) this.synced.delete(path);
-    else this.synced.set(path, hash);
-  }
-
   /**
    * Feed a raw filesystem event. Events for the same path are coalesced and
    * emitted together once the debounce window closes.

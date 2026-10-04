@@ -16,13 +16,14 @@ import { sha256Hex } from "@hyphae/core";
 import type { AiBindingLike } from "@hyphae/merge-agent";
 import { createMergeRunner } from "@hyphae/merge-agent";
 import type { HistoryEvent, HubRpc } from "@hyphae/protocol";
-import { parseClientMessage } from "@hyphae/protocol";
 import type { ArtifactsLike, R2BucketLike, RepoStore } from "@hyphae/repostore";
 import { ArtifactsRepoStore } from "@hyphae/repostore";
 import { Agent } from "agents";
 import { CheckpointScheduler } from "./checkpoint.ts";
 import { runCheckpoint } from "./checkpoint-runner.ts";
 import { type ApplyResult, type BlobReader, HubCore, type HubCoreOptions } from "./core.ts";
+import { base64ToBytes, isAlreadyExistsError, parseClientMessageSafe } from "./helpers.ts";
+import { HistoryFeed } from "./history.ts";
 
 export interface HubEnv {
   /** Content-addressed blob store (ADR-004). */
@@ -75,24 +76,22 @@ export interface ConnectionState {
 }
 
 const MANIFEST_KEY = "manifest";
-const HISTORY_KEY = "history";
-/** How many recent events to keep for the live view. */
-const HISTORY_LIMIT = 200;
 /** Artifacts repo name used for this Hub's checkpoints. */
 const STORE_REPO = "main";
 
 export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc {
   private core: HubCore | null = null;
   private readonly checkpoints = new CheckpointScheduler();
-  private history: HistoryEvent[] = [];
+  private readonly history: HistoryFeed;
   /** Built lazily from the Artifacts binding (ADR-018). */
   private artifactsStore: RepoStore | null = null;
 
   constructor(ctx: ConstructorParameters<typeof Agent>[0], env: HubEnv) {
     super(ctx, env);
+    this.history = new HistoryFeed(ctx.storage);
     ctx.blockConcurrencyWhile(async () => {
       await this.loadManifest();
-      await this.loadHistory();
+      await this.history.load();
     });
   }
 
@@ -168,20 +167,6 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     };
   }
 
-  private async loadHistory(): Promise<void> {
-    const stored = await this.ctx.storage.get<HistoryEvent[]>(HISTORY_KEY);
-    if (stored) this.history = stored;
-  }
-
-  /** Append an event to the feed and persist the bounded list. */
-  private async recordEvent(event: HistoryEvent): Promise<void> {
-    this.history.push(event);
-    if (this.history.length > HISTORY_LIMIT) {
-      this.history = this.history.slice(-HISTORY_LIMIT);
-    }
-    await this.ctx.storage.put(HISTORY_KEY, this.history);
-  }
-
   private ensureCore(): HubCore {
     if (!this.core) {
       const options: HubCoreOptions = { repoId: this.ctx.id.name ?? "repo" };
@@ -249,8 +234,8 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     };
     connection.setState(state);
     this.sendManifest(connection);
-    if (this.history.length > 0) {
-      connection.send(JSON.stringify({ type: "history", events: this.history }));
+    if (this.history.size > 0) {
+      connection.send(JSON.stringify({ type: "history", events: this.history.snapshot() }));
     }
     this.broadcastPresence();
   }
@@ -337,7 +322,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
         if (hash) await this.env.BLOBS?.put(hash, result.mergedContent);
       }
       await this.persistManifest();
-      await this.recordEvent({
+      await this.history.record({
         kind: result.mergedContent ? "merge" : "change",
         path: change.path,
         by: actorId,
@@ -359,7 +344,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     }
 
     // Conflict: surface it, then try the verified merging agent (ADR-005, ADR-014).
-    await this.recordEvent({
+    await this.history.record({
       kind: "conflict",
       path: change.path,
       by: actorId,
@@ -411,7 +396,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
       });
     } catch (err) {
       // Surface the failure instead of swallowing it, so the live view shows why.
-      await this.recordEvent({
+      await this.history.record({
         kind: "conflict",
         path: change.path,
         by: "merging-agent",
@@ -423,7 +408,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
 
     if (outcome.status !== "merged" || outcome.content === undefined) {
       // Keep both: the conflict stays surfaced for a human. Nothing is lost.
-      await this.recordEvent({
+      await this.history.record({
         kind: "conflict",
         path: change.path,
         by: "merging-agent",
@@ -448,7 +433,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     // If the resolution was stale (the file moved on), do not broadcast it.
     if (entry?.blobHash !== hash) return;
     await this.persistManifest();
-    await this.recordEvent({
+    await this.history.record({
       kind: "resolved",
       path: change.path,
       by: "merging-agent",
@@ -480,7 +465,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
       try {
         await this.ctx.storage.setAlarm(next);
       } catch (err) {
-        await this.recordEvent({
+        await this.history.record({
           kind: "change",
           by: "hub",
           detail: `alarm failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
@@ -556,7 +541,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
 
   /** Public method: recent activity feed, for read clients (the live view). */
   recentEvents(): { events: HistoryEvent[] } {
-    return { events: this.history };
+    return { events: this.history.snapshot() };
   }
 
   private async storeInline(base64: string): Promise<string> {
@@ -565,41 +550,4 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     await this.env.BLOBS?.put(hash, bytes);
     return hash;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers (kept local so the Hub has no extra dependencies)
-// ---------------------------------------------------------------------------
-
-function parseClientMessageSafe(
-  raw: unknown,
-):
-  | { ok: true; value: ReturnType<typeof parseClientMessage>; raw: unknown }
-  | { ok: false; error: string } {
-  try {
-    return { ok: true, value: parseClientMessage(raw), raw };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "invalid message" };
-  }
-}
-
-/**
- * True when an error means "the repo already exists", the one create failure
- * that is safe to ignore. Matches the Artifacts API's conflict signal, and any
- * message that says so, without swallowing unrelated failures.
- */
-function isAlreadyExistsError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const status =
-    (err as { status?: unknown }).status ?? (err as { statusCode?: unknown }).statusCode;
-  if (status === 409 || status === 400) return true;
-  const message = (err as { message?: unknown }).message;
-  return typeof message === "string" && /already exists|conflict/i.test(message);
-}
-
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-  return out;
 }

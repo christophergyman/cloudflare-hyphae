@@ -52,6 +52,7 @@ export class Watcher {
     this.actorId = options.actorId;
     this.engine = new SyncEngine({
       actorId: options.actorId,
+      repoId: options.repo,
       root: options.root,
       fs: new NodeFileSystem(),
     });

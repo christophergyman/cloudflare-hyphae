@@ -31,6 +31,8 @@ export type BlobPusher = (bytes: Uint8Array) => Promise<string>;
 
 export interface SyncEngineOptions {
   actorId: string;
+  /** Identifies the repo this engine syncs with; sent in the hello handshake. */
+  repoId?: string;
   root: string;
   fs: FileSystemPort;
   detector?: ChangeDetector;
@@ -45,6 +47,8 @@ export class SyncEngine {
   private pushBlob: BlobPusher | null = null;
   private readonly root: string;
   private readonly fs: FileSystemPort;
+  private readonly actorId: string;
+  private readonly repoId: string;
 
   /** Journal of changes not yet acknowledged (offline queue, ADR-016). */
   private readonly queued: DetectedChange[] = [];
@@ -52,6 +56,8 @@ export class SyncEngine {
   constructor(options: SyncEngineOptions) {
     this.root = options.root;
     this.fs = options.fs;
+    this.actorId = options.actorId;
+    this.repoId = options.repoId ?? "";
     this.detector =
       options.detector ??
       new ChangeDetector(this.synced, {
@@ -75,7 +81,7 @@ export class SyncEngine {
 
     transport.onOpen(() => {
       this.online = true;
-      transport.send({ type: "hello", actorId: "", repoId: "" });
+      transport.send({ type: "hello", actorId: this.actorId, repoId: this.repoId });
       void this.replayQueue();
     });
     transport.onClose?.(() => {
