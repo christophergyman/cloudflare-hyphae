@@ -103,13 +103,12 @@ The Hub is the conductor, not the orchestra. It is deliberately thin: it decides
 
 ## Status
 
-- **Phase:** Phases 3 and 5 built. The full demo path now exists end to end in code.
-- **Done:** contracts (`core`, `protocol`, `repostore`, `merge`), the Hub (`HubCore` + Agents SDK `Agent`), the Artifacts adapter and checkpoints, the **client watcher**, the **verified merge agent**, and the **CLI**. 121 tests total.
-- **Client watcher (Phase 3):** `@hyphae/client` debounces events, detects real changes by hash, suppresses its own writes (echo), applies remote changes atomically, jails every path, and queues changes offline. Two-client convergence is unit-tested.
-- **Verified merge agent (Phase 5):** `@hyphae/merge-agent` asks a model for a merge, verifies it by running the project's tests, and accepts only green results, otherwise keeping both sides. The merge Workflow wires it to AI Gateway and a Sandbox; test-command detection reads package.json.
-- **CLI (ADR-013):** `hyphae up <folder>`, `hyphae checkpoint`, `hyphae status`.
-- **Not yet verified:** the Agents SDK WebSocket path, hibernation, R2, AI Gateway, and Containers need a Workers Paid account. Everything logical is tested locally; the Cloudflare bindings are wired but unrun.
-- **Next:** run it live on Cloudflare (deploy, smoke test), then the live view and MCP surface.
+- **Phase:** the full demo path is built and **running live on Cloudflare**.
+- **Live deployment:** `https://hyphae-edge.christophergayiuman.workers.dev` serves the API and the **live view** (open it and enter a repo name).
+- **Proven live:** two clients sync through the Hub over the Agents SDK WebSocket; a concurrent **disjoint** edit clean-merges with correct content; a concurrent **same-line** edit surfaces a conflict; blobs round-trip through R2; the live view shows actors, files, activity, and previews in real time.
+- **Live view (`apps/web`):** a read-only dashboard served as a static asset from the edge Worker. Shows connected actors, current files and versions, a live activity feed (changes, clean merges, conflicts, agent resolutions), and a file preview from R2. The Hub keeps the last 200 events so the feed is populated on open.
+- **Spike 1 (Artifacts write path):** proven locally against a real git server (commit, incremental push, clone-back).
+- **Not yet wired live:** Artifacts as the Hub's durable store, and the AI merge (AI Gateway + container). Both are built and unit-tested; only the live bindings remain.
 - Cloudflare Artifacts is in open beta and available on the Workers Paid plan.
 
 ---

@@ -105,7 +105,7 @@ describe("mergeFile: no dropped or duplicated base lines", () => {
 describe("mergeFile: large files", () => {
   it("merges disjoint edits in a file over the old 4000-line cap", () => {
     const n = 5000;
-    const base = Array.from({ length: n }, (_, i) => `line ${i}`).join("\n") + "\n";
+    const base = `${Array.from({ length: n }, (_, i) => `line ${i}`).join("\n")}\n`;
     const ours = base.replace("line 100", "line 100 OURS").replace("line 4000", "line 4000 OURS");
     const theirs = base.replace("line 2000", "line 2000 THEIRS");
     const r = mergeFile(base, ours, theirs);

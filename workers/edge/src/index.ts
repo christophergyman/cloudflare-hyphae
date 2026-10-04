@@ -13,6 +13,8 @@ export interface Env {
   BLOBS: R2Bucket;
   /** The Hub Durable Object namespace (bound as `Hub` in wrangler.toml). */
   Hub: DurableObjectNamespace;
+  /** Static assets (apps/web/public): the live view. */
+  ASSETS?: { fetch(request: Request): Promise<Response> };
   ENVIRONMENT?: string;
 }
 
@@ -42,6 +44,28 @@ export default {
       return Response.json(result);
     }
 
+    // Read a repo's current manifest (used by the live view's file list).
+    const manifestMatch = url.pathname.match(/^\/repos\/([^/]+)\/manifest$/);
+    if (manifestMatch && request.method === "GET") {
+      const repoName = manifestMatch[1] as string;
+      const id = env.Hub.idFromName(repoName);
+      const stub = env.Hub.get(id) as unknown as {
+        manifest(): Promise<{ entries: Record<string, unknown> }>;
+      };
+      return Response.json(await stub.manifest());
+    }
+
+    // Recent activity for a repo (used by the live view on first load).
+    const historyMatch = url.pathname.match(/^\/repos\/([^/]+)\/history$/);
+    if (historyMatch && request.method === "GET") {
+      const repoName = historyMatch[1] as string;
+      const id = env.Hub.idFromName(repoName);
+      const stub = env.Hub.get(id) as unknown as {
+        recentEvents(): Promise<{ events: unknown[] }>;
+      };
+      return Response.json(await stub.recentEvents());
+    }
+
     // Content upload (small files). In production this becomes an R2 presigned
     // PUT (ADR-020); this direct endpoint keeps the client simple for now.
     if (url.pathname === "/blobs" && request.method === "PUT") {
@@ -67,6 +91,11 @@ export default {
         { error: "not_implemented", detail: "R2 presign lands in the presign spike (ADR-020)" },
         { status: 501 },
       );
+    }
+
+    // Anything else: serve the live view from static assets.
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(request);
     }
 
     return Response.json({ error: "not_found" }, { status: 404 });

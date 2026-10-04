@@ -161,6 +161,22 @@ export const errorMessageSchema = z.object({
   message: z.string(),
 });
 
+/** One entry in the recent-activity feed the Hub replays on connect. */
+export const historyEventSchema = z.object({
+  /** Event kind: change, conflict, resolved, merge, presence. */
+  kind: z.string(),
+  path: z.string().optional(),
+  by: z.string().optional(),
+  detail: z.string().optional(),
+  version: z.number().int().nonnegative().optional(),
+  at: z.number(),
+});
+
+export const historyMessageSchema = z.object({
+  type: z.literal("history"),
+  events: z.array(historyEventSchema),
+});
+
 export const hubMessageSchema = z.union([
   manifestMessageSchema,
   changedMessageSchema,
@@ -168,6 +184,7 @@ export const hubMessageSchema = z.union([
   resolvedMessageSchema,
   presenceMessageSchema,
   errorMessageSchema,
+  historyMessageSchema,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -209,6 +226,8 @@ export type ConflictMessage = z.infer<typeof conflictMessageSchema>;
 export type ResolvedMessage = z.infer<typeof resolvedMessageSchema>;
 export type PresenceMessage = z.infer<typeof presenceMessageSchema>;
 export type ErrorMessage = z.infer<typeof errorMessageSchema>;
+export type HistoryEvent = z.infer<typeof historyEventSchema>;
+export type HistoryMessage = z.infer<typeof historyMessageSchema>;
 export type HubMessage = z.infer<typeof hubMessageSchema>;
 
 export type PresignRequest = z.infer<typeof presignRequestSchema>;

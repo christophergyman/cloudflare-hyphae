@@ -35,12 +35,12 @@ Each checkpoint answers three questions:
 
 ## Build status
 
-- **Phases 3 and 5 built.** The full demo path exists end to end in code; 121 tests pass.
-- **Done:** contracts (`core`, `protocol`, `repostore`, `merge`), the Hub, the Artifacts adapter and checkpoints, the client watcher, the verified merge agent, and the CLI.
-- **Client watcher:** debounce, hash-based change detection, echo suppression, atomic apply, path jail, offline queue. Two-client convergence is unit-tested.
-- **Verified merge agent:** model merge verified by running tests; green-only accept, otherwise keep both. Wired to AI Gateway and a Sandbox in the merge Workflow.
-- **Not yet verified:** the Agents SDK WebSocket path, hibernation, R2, AI Gateway, and Containers need a Workers Paid account. The logic is tested locally; the Cloudflare bindings are wired but unrun.
-- **Next:** deploy and smoke-test live on Cloudflare, then the live view and MCP surface.
+- **The full demo path is built and running live on Cloudflare.**
+- **Live deployment:** `https://hyphae-edge.christophergayiuman.workers.dev` (API plus the live view).
+- **Proven live:** two-client sync over the Agents SDK WebSocket, a concurrent disjoint clean-merge with correct content, a same-line conflict, R2 blob round-trips, and the live view updating in real time.
+- **Done:** contracts, the Hub, the Artifacts adapter and checkpoints, the client watcher, the verified merge agent, the CLI, and the live view.
+- **Not yet wired live:** Artifacts as the Hub's durable store, and the AI merge (AI Gateway + container). Both are built and unit-tested; only the live bindings remain.
+- **Next:** wire those two live, then the MCP surface.
 
 ---
 

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hyphae live</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Hyphae</div>
+      <div class="repo">
+        <label for="repo">repo</label>
+        <input id="repo" value="live-demo" spellcheck="false" />
+        <button id="connect" type="button">connect</button>
+      </div>
+      <div class="status">
+        <span id="dot" class="dot off"></span>
+        <span id="statusText">disconnected</span>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="panel">
+        <h2>Connected <span id="actorCount" class="count">0</span></h2>
+        <ul id="actors" class="actors"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Files <span id="fileCount" class="count">0</span></h2>
+        <ul id="files" class="files"></ul>
+      </section>
+
+      <section class="panel wide">
+        <h2>Activity</h2>
+        <ul id="feed" class="feed"></ul>
+      </section>
+
+      <section class="panel wide">
+        <h2>Preview <span id="previewPath" class="count"></span></h2>
+        <pre id="preview" class="preview">select a file</pre>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

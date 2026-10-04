@@ -59,21 +59,52 @@ export interface ConnectionState {
   actorId: string;
   displayName: string;
   kind: "human" | "agent";
+  /** A read-only participant (the live view); does not count as an editor. */
+  observer?: boolean;
+}
+
+/** One event in the recent-activity feed (replayed on connect). */
+export interface HistoryEvent {
+  kind: "change" | "conflict" | "resolved" | "merge" | "delete";
+  path?: string;
+  by?: string;
+  detail?: string;
+  version?: number;
+  at: number;
 }
 
 const MANIFEST_KEY = "manifest";
+const HISTORY_KEY = "history";
+/** How many recent events to keep for the live view. */
+const HISTORY_LIMIT = 200;
 /** Artifacts repo name used for this Hub's checkpoints. */
 const STORE_REPO = "main";
 
 export class Hub extends Agent<HubEnv, Record<string, never>> {
   private core: HubCore | null = null;
   private readonly checkpoints = new CheckpointScheduler();
+  private history: HistoryEvent[] = [];
 
   constructor(ctx: ConstructorParameters<typeof Agent>[0], env: HubEnv) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
       await this.loadManifest();
+      await this.loadHistory();
     });
+  }
+
+  private async loadHistory(): Promise<void> {
+    const stored = await this.ctx.storage.get<HistoryEvent[]>(HISTORY_KEY);
+    if (stored) this.history = stored;
+  }
+
+  /** Append an event to the feed and persist the bounded list. */
+  private async recordEvent(event: HistoryEvent): Promise<void> {
+    this.history.push(event);
+    if (this.history.length > HISTORY_LIMIT) {
+      this.history = this.history.slice(-HISTORY_LIMIT);
+    }
+    await this.ctx.storage.put(HISTORY_KEY, this.history);
   }
 
   private ensureCore(): HubCore {
@@ -114,7 +145,12 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
   private broadcastPresence(): void {
     const actors = [...this.getConnections<ConnectionState>()].map((c) => {
       const state = c.state ?? { actorId: "unknown", displayName: "unknown", kind: "human" };
-      return { actorId: state.actorId, displayName: state.displayName, kind: state.kind };
+      return {
+        actorId: state.actorId,
+        displayName: state.displayName,
+        kind: state.kind,
+        observer: state.observer ?? false,
+      };
     });
     this.broadcast(JSON.stringify({ type: "presence", actors }));
   }
@@ -128,9 +164,13 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
       actorId: url.searchParams.get("actorId") ?? `anon-${connection.id.slice(0, 6)}`,
       displayName: url.searchParams.get("displayName") ?? "anonymous",
       kind: (url.searchParams.get("kind") as ConnectionState["kind"]) ?? "human",
+      observer: url.searchParams.get("observer") === "1",
     };
     connection.setState(state);
     this.sendManifest(connection);
+    if (this.history.length > 0) {
+      connection.send(JSON.stringify({ type: "history", events: this.history }));
+    }
     this.broadcastPresence();
   }
 
@@ -216,6 +256,14 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
         if (hash) await this.env.BLOBS?.put(hash, result.mergedContent);
       }
       await this.persistManifest();
+      await this.recordEvent({
+        kind: result.mergedContent ? "merge" : "change",
+        path: change.path,
+        by: actorId,
+        detail: result.mergedContent ? "merged cleanly" : undefined,
+        version: result.entry?.version,
+        at: Date.now(),
+      });
       this.broadcast(
         JSON.stringify({
           type: "changed",
@@ -230,6 +278,12 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
     }
 
     // Conflict: surface it, then try the verified merging agent (ADR-005, ADR-014).
+    await this.recordEvent({
+      kind: "conflict",
+      path: change.path,
+      by: actorId,
+      at: Date.now(),
+    });
     connection.send(
       JSON.stringify({
         type: "conflict",
@@ -286,6 +340,13 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
     // If the resolution was stale (the file moved on), do not broadcast it.
     if (entry?.blobHash !== hash) return;
     await this.persistManifest();
+    await this.recordEvent({
+      kind: "resolved",
+      path: change.path,
+      by: "merging-agent",
+      detail: "resolved and verified",
+      at: Date.now(),
+    });
     this.broadcast(
       JSON.stringify({
         type: "resolved",
@@ -364,6 +425,16 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
     if (next !== null) {
       await this.ctx.storage.setAlarm(next);
     }
+  }
+
+  /** Public method: current manifest, for read clients (the live view). */
+  manifest(): { entries: Record<string, ManifestEntry> } {
+    return { entries: this.ensureCore().manifestEntries() };
+  }
+
+  /** Public method: recent activity feed, for read clients (the live view). */
+  recentEvents(): { events: HistoryEvent[] } {
+    return { events: this.history };
   }
 
   private async storeInline(base64: string): Promise<string> {
