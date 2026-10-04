@@ -15,6 +15,10 @@ export interface Env {
   Hub: DurableObjectNamespace;
   /** Static assets (apps/web/public): the live view. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
+  /** Workers AI binding, passed through to the Hub. */
+  AI?: { run(model: string, options: unknown): Promise<unknown> };
+  /** Merge model name (see wrangler.toml). */
+  MODEL?: string;
   ENVIRONMENT?: string;
 }
 
@@ -27,6 +31,28 @@ export default {
 
     if (url.pathname === "/health") {
       return Response.json({ ok: true, service: SERVICE, version: VERSION });
+    }
+
+    // Diagnostics: prove the Workers AI binding works and return the raw shape.
+    if (url.pathname === "/ai-check") {
+      try {
+        const model = env.MODEL ?? "@cf/moonshotai/kimi-k2.7-code";
+        const out = await env.AI?.run(model, {
+          messages: [
+            {
+              role: "user",
+              content:
+                "Resolve this merge conflict. Output ONLY the merged file. No markers, no fences.\n\n--- BASE ---\n1\n2\n3\n--- OURS ---\nA\n2\n3\n--- THEIRS ---\nB\n2\n3\n\nMerged:",
+            },
+          ],
+        });
+        return Response.json({ ok: true, model, raw: out });
+      } catch (err) {
+        return Response.json(
+          { ok: false, error: err instanceof Error ? err.message : String(err) },
+          { status: 500 },
+        );
+      }
     }
 
     // Route WebSocket upgrades and Hub HTTP to the per-repo Agent.

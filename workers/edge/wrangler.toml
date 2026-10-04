@@ -12,12 +12,23 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 # Always run the Worker first for API and agent routes so the SPA fallback
 # never intercepts WebSocket upgrades or REST calls.
-run_worker_first = ["/health", "/repos/*", "/blobs/*", "/blobs", "/agents/*"]
+run_worker_first = ["/health", "/ai-check", "/repos/*", "/blobs/*", "/blobs", "/agents/*"]
 
 # Blob content is content-addressed in R2 (ADR-004, ADR-020).
 [[r2_buckets]]
 binding = "BLOBS"
 bucket_name = "hyphae-blobs"
+
+# Durable git history (ADR-018). The Workers binding creates and manages
+# repos; the Hub commits through isomorphic-git. Passed to the Hub as env.
+[[artifacts]]
+binding = "ARTIFACTS"
+namespace = "default"
+
+# Workers AI for the verified merge (ADR-021). Routed through AI Gateway when
+# configured; the Hub's MERGE binding consumes this.
+[ai]
+binding = "AI"
 
 # One Hub (Durable Object) per repo, built on the Agents SDK (ADR-017).
 # SQLite-backed storage is used (ADR-019).
@@ -31,3 +42,6 @@ new_sqlite_classes = ["Hub"]
 
 [vars]
 ENVIRONMENT = "development"
+# A frontier-scale open coding model available on Workers AI. The merge agent
+# needs a generative code model (ADR-014).
+MODEL = "@cf/moonshotai/kimi-k2.7-code"

@@ -14,6 +14,7 @@
 import type { Change, ManifestEntry } from "@hyphae/core";
 import { parseClientMessage } from "@hyphae/protocol";
 import type { RepoStore } from "@hyphae/repostore";
+import { ArtifactsRepoStore } from "@hyphae/repostore";
 import { Agent } from "agents";
 import { CheckpointScheduler } from "./checkpoint.ts";
 import { runCheckpoint } from "./checkpoint-runner.ts";
@@ -28,10 +29,36 @@ export interface HubEnv {
    */
   REPO_STORE?: RepoStore;
   /**
+   * The Artifacts binding (ADR-018). When present, the Hub builds a
+   * {@link RepoStore} from it on first checkpoint, so durable history works
+   * with no extra wiring.
+   */
+  ARTIFACTS?: ArtifactsBindingLike;
+  /**
    * Runs a conflict job (the verified merge Workflow, ADR-014). Optional: when
    * absent, conflicts are simply surfaced and resolved by a human.
    */
   MERGE?: MergeRunner;
+  /** Workers AI binding, used to build a merge runner when MERGE is absent. */
+  AI?: AiBindingLike;
+  /** Model name for the AI merge. */
+  MODEL?: string;
+  /** Optional per-repo test command for verification. */
+  TEST_COMMAND?: string;
+}
+
+/** Minimal structural view of the Workers AI binding. */
+export interface AiBindingLike {
+  run(model: string, options: unknown): Promise<unknown>;
+}
+
+/** Minimal structural view of the Artifacts Workers binding. */
+export interface ArtifactsBindingLike {
+  create(name: string): Promise<{ name: string; remote: string; token: string }>;
+  get(name: string): Promise<{
+    info(): Promise<{ remote: string } | null>;
+    createToken(scope?: "read" | "write", ttl?: number): Promise<string>;
+  }>;
 }
 
 /**
@@ -39,13 +66,13 @@ export interface HubEnv {
  * production this is a Workflow; for tests it can be a direct call.
  */
 export interface MergeRunner {
-  run(job: {
-    repoId: string;
-    path: string;
-    base: string;
-    ours: string;
-    theirs: string;
-  }): Promise<{ status: "merged" | "kept-both"; content?: string; reason?: string }>;
+  run(job: { repoId: string; path: string; base: string; ours: string; theirs: string }): Promise<{
+    status: "merged" | "kept-both";
+    content?: string;
+    reason?: string;
+    /** True when the result was verified by running tests (ADR-014). */
+    verified?: boolean;
+  }>;
 }
 
 /** Minimal R2 surface the Hub needs (keeps this free of binding types). */
@@ -84,6 +111,8 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
   private core: HubCore | null = null;
   private readonly checkpoints = new CheckpointScheduler();
   private history: HistoryEvent[] = [];
+  /** Built lazily from the Artifacts binding (ADR-018). */
+  private artifactsStore: RepoStore | null = null;
 
   constructor(ctx: ConstructorParameters<typeof Agent>[0], env: HubEnv) {
     super(ctx, env);
@@ -91,6 +120,79 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
       await this.loadManifest();
       await this.loadHistory();
     });
+  }
+
+  /**
+   * The durable store for checkpoints. Uses an explicit `REPO_STORE` if given,
+   * otherwise builds an Artifacts-backed store from the `ARTIFACTS` binding.
+   * Returns null when neither is available, so the Hub still runs live-only.
+   */
+  private repoStore(): RepoStore | null {
+    if (this.env.REPO_STORE) return this.env.REPO_STORE;
+    if (this.env.ARTIFACTS) {
+      if (!this.artifactsStore) {
+        this.artifactsStore = new ArtifactsRepoStore(this.env.ARTIFACTS, {
+          username: "x",
+          tokenTtlSeconds: 3600,
+        });
+      }
+      return this.artifactsStore;
+    }
+    return null;
+  }
+
+  /** Ensure the Artifacts repo exists before the first commit. */
+  private async ensureRepo(repo: string, store: RepoStore): Promise<void> {
+    try {
+      await store.createRepo(repo);
+    } catch {
+      // Already exists: fine.
+    }
+  }
+
+  /**
+   * The merge runner. Uses an explicit `MERGE` binding if given, otherwise
+   * builds one from the Workers AI binding. Returns null when neither is
+   * available, so conflicts are simply surfaced (never lost).
+   */
+  private mergeRunner(): MergeRunner | null {
+    if (this.env.MERGE) return this.env.MERGE;
+    if (!this.env.AI) return null;
+    const ai = this.env.AI;
+    const model = this.env.MODEL ?? "@cf/moonshotai/kimi-k2.7-code";
+    return {
+      async run(job) {
+        const result = await ai.run(model, {
+          messages: [
+            {
+              role: "system",
+              content:
+                "You resolve git merge conflicts. Output ONLY the fully merged file content. No conflict markers, no explanation, no code fences.",
+            },
+            {
+              role: "user",
+              content: [
+                "Resolve this merge conflict.",
+                "",
+                "--- BASE ---",
+                job.base,
+                "--- OURS ---",
+                job.ours,
+                "--- THEIRS ---",
+                job.theirs,
+                "",
+                "Return the merged file.",
+              ].join("\n"),
+            },
+          ],
+        });
+        const content = stripFences(extractText(result));
+        if (content.trim().length === 0) {
+          return { status: "kept-both", reason: "model returned empty content" };
+        }
+        return { status: "merged", content };
+      },
+    };
   }
 
   private async loadHistory(): Promise<void> {
@@ -302,7 +404,9 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
    * surfaced; nothing is ever discarded.
    */
   private async tryResolveConflict(change: Change, result: ApplyResult): Promise<void> {
-    if (!this.env.MERGE || !result.conflict) return;
+    if (!result.conflict) return;
+    const merge = this.mergeRunner();
+    if (!merge) return;
 
     const read = this.blobReader();
     const baseBytes = result.conflict.baseHash ? await read(result.conflict.baseHash) : null;
@@ -312,16 +416,41 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
 
     const decode = (b: Uint8Array | null) => (b ? new TextDecoder().decode(b) : "");
 
-    const outcome = await this.env.MERGE.run({
-      repoId: this.ctx.id.name ?? "repo",
-      path: change.path,
-      base: decode(baseBytes),
-      ours: decode(oursBytes),
-      theirs: decode(theirsBytes),
-    });
+    let outcome: {
+      status: "merged" | "kept-both";
+      content?: string;
+      reason?: string;
+      verified?: boolean;
+    };
+    try {
+      outcome = await merge.run({
+        repoId: this.ctx.id.name ?? "repo",
+        path: change.path,
+        base: decode(baseBytes),
+        ours: decode(oursBytes),
+        theirs: decode(theirsBytes),
+      });
+    } catch (err) {
+      // Surface the failure instead of swallowing it, so the live view shows why.
+      await this.recordEvent({
+        kind: "conflict",
+        path: change.path,
+        by: "merging-agent",
+        detail: `merge failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
+        at: Date.now(),
+      });
+      return;
+    }
 
     if (outcome.status !== "merged" || outcome.content === undefined) {
       // Keep both: the conflict stays surfaced for a human. Nothing is lost.
+      await this.recordEvent({
+        kind: "conflict",
+        path: change.path,
+        by: "merging-agent",
+        detail: `kept both: ${outcome.reason ?? "unresolved"}`.slice(0, 200),
+        at: Date.now(),
+      });
       return;
     }
 
@@ -344,7 +473,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
       kind: "resolved",
       path: change.path,
       by: "merging-agent",
-      detail: "resolved and verified",
+      detail: outcome.verified ? "resolved and verified" : "resolved by agent",
       at: Date.now(),
     });
     this.broadcast(
@@ -381,13 +510,15 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
 
   /** Commit to durable history if the scheduler says it is due. */
   private async maybeCheckpoint(): Promise<void> {
-    if (!this.env.REPO_STORE) return; // no durable store configured
+    const store = this.repoStore();
+    if (!store) return; // no durable store configured
     const decision = this.checkpoints.due(Date.now());
     if (!decision) return;
 
     const generation = this.checkpoints.generation;
     const core = this.ensureCore();
-    const result = await runCheckpoint(this.env.REPO_STORE, {
+    await this.ensureRepo(STORE_REPO, store);
+    const result = await runCheckpoint(store, {
       repo: STORE_REPO,
       entries: core.manifestEntries(),
       readBlob: this.blobReader(),
@@ -405,11 +536,13 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
 
   /** Public method: force a checkpoint now (manual trigger, ADR-006). */
   async checkpoint(): Promise<{ committed: boolean }> {
-    if (!this.env.REPO_STORE) return { committed: false };
+    const store = this.repoStore();
+    if (!store) return { committed: false };
     // A manual checkpoint commits the current state regardless of timing.
     const generation = this.checkpoints.generation;
     const core = this.ensureCore();
-    const result = await runCheckpoint(this.env.REPO_STORE, {
+    await this.ensureRepo(STORE_REPO, store);
+    const result = await runCheckpoint(store, {
       repo: STORE_REPO,
       entries: core.manifestEntries(),
       readBlob: this.blobReader(),
@@ -473,4 +606,29 @@ async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
   copy.set(bytes);
   const digest = await crypto.subtle.digest("SHA-256", copy);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Remove a ```lang fence if the model wrapped its answer in one. */
+function stripFences(text: string): string {
+  const match = text.match(/^\s*```[a-zA-Z0-9]*\n([\s\S]*?)\n?```\s*$/);
+  return match?.[1] ?? text;
+}
+
+/**
+ * Extract the assistant text from a Workers AI response. Different models
+ * return either `{ response }` (text-generation style) or the OpenAI-style
+ * `{ choices: [{ message: { content } }] }`. Handle both.
+ */
+function extractText(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (result && typeof result === "object") {
+    const r = result as {
+      response?: unknown;
+      choices?: { message?: { content?: unknown } }[];
+    };
+    if (typeof r.response === "string") return r.response;
+    const content = r.choices?.[0]?.message?.content;
+    if (typeof content === "string") return content;
+  }
+  return "";
 }
