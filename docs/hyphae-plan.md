@@ -33,6 +33,15 @@ Each checkpoint answers three questions:
 
 ---
 
+## Build status
+
+- **Phase 0 in progress.** The foundation is shipped.
+- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`) with tests, the edge Worker skeleton, and spike 1.
+- **Spike 1 (Artifacts write path):** isomorphic-git commit and push over smart HTTP proven locally, including an incremental commit and clone-back. Only the Artifacts host and token auth remain, and they need a Workers Paid account. See `spikes/artifacts-push/README.md`.
+- **Next:** the remaining Phase 0 spikes (Agents SDK Hub, `ctx.container`, R2 presign, AI Gateway, Ed25519), then Checkpoint 0.
+
+---
+
 ## 1. Guiding principles for the build
 
 1. **Retire risk first.** The client watcher (ADR-010) and the merge core (ADR-005) are the risk. Build and prove them before anything pretty.

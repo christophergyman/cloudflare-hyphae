@@ -1,0 +1,12 @@
+name = "hyphae-edge"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Blob content is content-addressed in R2 (ADR-004, ADR-020).
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "hyphae-blobs"
+
+[vars]
+ENVIRONMENT = "development"

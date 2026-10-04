@@ -1,0 +1,27 @@
+{
+  "name": "cloudflare-hyphae",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "workers/*",
+    "apps/*",
+    "spikes/*"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p workers/edge/tsconfig.json",
+    "check": "bun run typecheck && bun test",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "spike:artifacts": "bun run --cwd spikes/artifacts-push local"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@cloudflare/workers-types": "^5.20261004.1",
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.147.0"
+  }
+}

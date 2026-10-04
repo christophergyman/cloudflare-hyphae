@@ -103,8 +103,10 @@ The Hub is the conductor, not the orchestra. It is deliberately thin: it decides
 
 ## Status
 
-- **Phase:** specification complete, no code yet.
-- The repo currently contains only documentation. The next step is scaffolding Phase 0.
+- **Phase:** Phase 0 in progress. The foundation is scaffolded and shipping.
+- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`) with 34 passing tests, the edge Worker skeleton, and spike 1.
+- **Spike 1 (Artifacts write path):** isomorphic-git commit and push over smart HTTP is proven locally, including an incremental commit and a clone-back. Only the Artifacts host and token auth remain, and they need a Workers Paid account. See `spikes/artifacts-push/README.md`.
+- **Next:** the remaining Phase 0 spikes (Agents SDK Hub, `ctx.container`, R2 presign, AI Gateway, Ed25519).
 - Cloudflare Artifacts is in open beta and available on the Workers Paid plan.
 
 ---

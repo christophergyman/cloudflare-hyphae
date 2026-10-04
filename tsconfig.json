@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@hyphae/core": ["./packages/core/src/index.ts"],
+      "@hyphae/protocol": ["./packages/protocol/src/index.ts"],
+      "@hyphae/repostore": ["./packages/repostore/src/index.ts"],
+      "@hyphae/merge": ["./packages/merge/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts"]
+}
