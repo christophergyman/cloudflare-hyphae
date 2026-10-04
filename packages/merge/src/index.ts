@@ -39,8 +39,12 @@ export interface MergeConflict {
 
 export type MergeResult = MergeClean | MergeConflict;
 
-/** Largest file (in lines) we attempt to merge in the fast path. */
-const MAX_LINES = 4000;
+/**
+ * Safety ceiling on file size (in lines). Myers is memory-bounded by the edit
+ * distance, not n*m, so this is a very high guard against pathological inputs,
+ * not a normal limit. Files up to this size merge in the fast path.
+ */
+const MAX_LINES = 200_000;
 
 interface Hunk {
   /** Base range replaced: [baseStart, baseEnd). */
@@ -68,25 +72,96 @@ function sameStrings(a: string[], b: string[]): boolean {
 }
 
 /**
- * A line diff (base -> other) as a list of hunks, via an LCS table. Hunks are
- * non-overlapping and ordered by baseStart. Insertions have baseStart === baseEnd.
+ * A line diff (base -> other) as a list of hunks.
+ *
+ * Uses Myers' O(ND) diff, where D is the number of differences. Real merges
+ * have few changes relative to file size, so this is near-linear and, unlike an
+ * LCS table, does not allocate O(n*m) memory. That is what lets large files
+ * merge cleanly instead of falling back to a whole-file conflict.
+ *
+ * Hunks are non-overlapping and ordered by baseStart. Insertions have
+ * baseStart === baseEnd.
  */
 function diffHunks(base: string[], other: string[]): Hunk[] {
   const n = base.length;
   const m = other.length;
-  // dp[i][j] = LCS length of base[i..] and other[j..]
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    const row = dp[i] as number[];
-    const next = dp[i + 1] as number[];
-    for (let j = m - 1; j >= 0; j--) {
-      row[j] =
-        base[i] === other[j]
-          ? (next[j + 1] as number) + 1
-          : Math.max(next[j] as number, row[j + 1] as number);
+
+  // Myers shortest edit script from base -> other.
+  const max = n + m;
+  if (max === 0) return [];
+  const vSize = 2 * max + 1;
+  const offset = max;
+  const v = new Int32Array(vSize);
+  // trace of v at each d, to reconstruct the path.
+  const trace: Int32Array[] = [];
+
+  let foundD = -1;
+  outer: for (let d = 0; d <= max; d++) {
+    const vSnapshot = v.slice();
+    trace.push(vSnapshot);
+    for (let k = -d; k <= d; k += 2) {
+      const ki = k + offset;
+      let x: number;
+      if (k === -d || (k !== d && (v[ki - 1] ?? 0) < (v[ki + 1] ?? 0))) {
+        x = v[ki + 1] ?? 0; // down: insertion
+      } else {
+        x = (v[ki - 1] ?? 0) + 1; // right: deletion
+      }
+      let y = x - k;
+      while (x < n && y < m && base[x] === other[y]) {
+        x++;
+        y++;
+      }
+      v[ki] = x;
+      if (x >= n && y >= m) {
+        foundD = d;
+        break outer;
+      }
     }
   }
 
+  // Backtrack to recover the edit path as (base index, other index) moves.
+  const moves: { type: "keep" | "insert" | "delete" }[] = [];
+  let x = n;
+  let y = m;
+  for (let d = foundD; d > 0; d--) {
+    const vPrev = trace[d] as Int32Array;
+    const k = x - y;
+    const ki = k + offset;
+    const down = k === -d || (k !== d && (vPrev[ki - 1] ?? 0) < (vPrev[ki + 1] ?? 0));
+    const prevK = down ? k + 1 : k - 1;
+    const prevX = vPrev[prevK + offset] ?? 0;
+    const prevY = prevX - prevK;
+    // Diagonal (keep) moves after the snake.
+    while (x > prevX && y > prevY) {
+      moves.push({ type: "keep" });
+      x--;
+      y--;
+    }
+    if (down) {
+      moves.push({ type: "insert" });
+      y--;
+    } else {
+      moves.push({ type: "delete" });
+      x--;
+    }
+  }
+  while (x > 0 && y > 0) {
+    moves.push({ type: "keep" });
+    x--;
+    y--;
+  }
+  while (x > 0) {
+    moves.push({ type: "delete" });
+    x--;
+  }
+  while (y > 0) {
+    moves.push({ type: "insert" });
+    y--;
+  }
+  moves.reverse();
+
+  // Turn the move list into hunks over base indices.
   const hunks: Hunk[] = [];
   let cur: Hunk | null = null;
   const flush = () => {
@@ -96,26 +171,22 @@ function diffHunks(base: string[], other: string[]): Hunk[] {
     }
   };
 
-  let i = 0;
-  let j = 0;
-  while (i < n || j < m) {
-    if (i < n && j < m && base[i] === other[j]) {
+  let bi = 0;
+  let oi = 0;
+  for (const move of moves) {
+    if (move.type === "keep") {
       flush();
-      i++;
-      j++;
+      bi++;
+      oi++;
       continue;
     }
-    const dpRow = dp[i] as number[];
-    const dpNext = dp[i + 1] as number[];
-    const canInsert = j < m && (i >= n || (dpRow[j + 1] ?? 0) >= (dpNext[j] ?? 0));
-    if (canInsert) {
-      if (!cur) cur = { baseStart: i, baseEnd: i, replacement: [] };
-      cur.replacement.push(other[j] as string);
-      j++;
+    if (!cur) cur = { baseStart: bi, baseEnd: bi, replacement: [] };
+    if (move.type === "delete") {
+      bi++;
+      cur.baseEnd = bi;
     } else {
-      if (!cur) cur = { baseStart: i, baseEnd: i, replacement: [] };
-      i++;
-      cur.baseEnd = i;
+      cur.replacement.push(other[oi] as string);
+      oi++;
     }
   }
   flush();
