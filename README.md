@@ -72,8 +72,9 @@ In order:
 1. **`README.md`** (this file): what the project is and the rules.
 2. **`docs/hyphae-prd.md`**: the product. Vision, problem, users, core concepts, what is in the MVP and what is not, risks, success metrics.
 3. **`docs/hyphae-adr.md`**: the architecture. 16 numbered decisions, the data model, protocols, repo layout, and the mapping to Cloudflare primitives.
-4. **`docs/hyphae-context.md`**: research, the review findings and their dispositions, accepted risks, and the loose ends not yet folded into the design.
-5. **`docs/archive/`**: the previous (rejected) design, kept for history. Do not build from it.
+4. **`docs/hyphae-plan.md`**: the build sequence. Phases, checkpoints, risk order, and the demo and MVP lines.
+5. **`docs/hyphae-context.md`**: research, the review findings and their dispositions, accepted risks, and the loose ends not yet folded into the design.
+6. **`docs/archive/`**: the previous (rejected) design, kept for history. Do not build from it.
 
 ---
 
@@ -181,17 +182,20 @@ This does not exist yet. It is the target for Phase 0.
 
 ---
 
-## Roadmap (Phase 0, in order)
+## Roadmap
 
-1. Monorepo scaffold: Bun workspaces, `wrangler.toml`, TypeScript config.
-2. `packages/merge`: the diff3 merge library and its tests (low risk, do first).
-3. **Client watcher spike:** watch a folder, debounce, hash, detect real changes, ignore its own writes, talk to a stub Hub. This is the riskiest path and the heart of the demo.
-4. Hub Durable Object: manifest, the core sync loop, WebSocket broadcast.
-5. `RepoStore` plus the Artifacts adapter.
-6. The merge Workflow: model call, Sandbox with tests, commit only on green.
-7. The simple live view.
+The full, checkpointed build sequence lives in `docs/hyphae-plan.md`. Short version, in risk order:
 
-Remaining decisions to settle during the build are listed in `docs/hyphae-adr.md`, Part 7.2.
+1. **Phase 0** Monorepo scaffold, contracts, and the `RepoStore` port.
+2. **Phase 1** `packages/merge`: the diff3 merge core with property tests.
+3. **Phase 2** The Hub Durable Object and the live sync loop.
+4. **Phase 3** The **client watcher spike** (the riskiest path and the demo's heart).
+5. **Phase 4** Checkpoints to Artifacts, plus Hub restart and replay.
+6. **Phase 5** The merge Workflow: model call, Sandbox with tests, commit only on green (**demo line**).
+7. **Phase 6** CLI, MCP server, and live view (**MVP line**).
+8. **Phases 7 to 10** Hardening, demo night, then the moat and scale layers.
+
+Remaining decisions to settle during the build are listed in `docs/hyphae-adr.md`, Part 7.2 and mapped to phases in the plan.
 
 ---
 
