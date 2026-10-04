@@ -71,10 +71,11 @@ In order:
 
 1. **`README.md`** (this file): what the project is and the rules.
 2. **`docs/hyphae-prd.md`**: the product. Vision, problem, users, core concepts, what is in the MVP and what is not, risks, success metrics.
-3. **`docs/hyphae-adr.md`**: the architecture. 16 numbered decisions, the data model, protocols, repo layout, and the mapping to Cloudflare primitives.
-4. **`docs/hyphae-plan.md`**: the build sequence. Phases, checkpoints, risk order, and the demo and MVP lines.
-5. **`docs/hyphae-context.md`**: research, the review findings and their dispositions, accepted risks, and the loose ends not yet folded into the design.
-6. **`docs/archive/`**: the previous (rejected) design, kept for history. Do not build from it.
+3. **`docs/hyphae-adr.md`**: the architecture. 23 numbered decisions, the data model, protocols, repo layout, and the mapping to Cloudflare primitives.
+4. **`docs/hyphae-stack.md`**: the concrete tools and services behind the decisions (Agents SDK, Artifacts write path, Containers, AI Gateway, and more).
+5. **`docs/hyphae-plan.md`**: the build sequence. Phases, checkpoints, risk order, and the demo and MVP lines.
+6. **`docs/hyphae-context.md`**: research, the review findings and their dispositions, accepted risks, and the loose ends not yet folded into the design.
+7. **`docs/archive/`**: the previous (rejected) design, kept for history. Do not build from it.
 
 ---
 

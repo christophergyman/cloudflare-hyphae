@@ -106,7 +106,7 @@ These are consciously deferred or not yet folded into v2. They are recorded so t
 
 ### Deliberately deferred (accepted risk)
 
-- **Abuse resistance.** We chose not to add, for the MVP: per-actor rate limits and auto-pausing a runaway agent; isolating CI from untrusted code; and XSS-safe rendering on the live view. Accepted risk. The runaway-agent rate limit is the first to revisit, because a stuck agent could spoil the live demo.
+- **Abuse resistance.** Originally we chose not to add, for the MVP: per-actor rate limits and auto-pausing a runaway agent; isolating CI from untrusted code; and XSS-safe rendering on the live view. **Update:** ADR-023 reopens this and closes the baseline with the Workers rate limiting binding, AI Gateway model limits, per-merge Containers for CI, and XSS-safe rendering. The remainder (runaway-agent auto-pause, broader isolation) stays deferred to Phase 10.
 
 ### Loose ends to fold into v2 when we build
 

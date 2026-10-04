@@ -225,15 +225,19 @@ updateRef(name, ref, hash) -> void
 
 - **Status:** Accepted
 - **Context:** Git merge cannot resolve same-line conflicts. We want the resolver to be trustworthy and to prove its work.
-- **Decision:** On a true conflict, the Hub starts a **Workflow** that: (1) asks a code-capable generative model, through **AI Gateway** (routed to Workers AI or an external provider), to produce the merged file; (2) boots a **Cloudflare Sandbox (Container)** named per merge, writes the versions, and runs the project's build and tests; (3) commits to Artifacts **only on green**, otherwise keeps both sides and surfaces the failure.
-- **Rationale:** Test-verified merges turn "the AI guessed" into "the AI proved it." Workflows give durability and retries; the sandbox gives safe execution of untrusted code.
+- **Decision:** On a true conflict, the Hub starts a **Workflow** that: (1) asks a code-capable generative model, through **AI Gateway** (routed to Workers AI or an external provider), to produce the merged file; (2) boots a **per-merge Cloudflare Container via `ctx.container`** (the `durable_object` scheduling policy), writes the versions, and runs the project's build and tests; (3) commits to Artifacts **only on green**, otherwise keeps both sides and surfaces the failure.
+- **Rationale:** Test-verified merges turn "the AI guessed" into "the AI proved it." Workflows give durability and retries; the container gives safe execution of untrusted code.
 - **Notes:**
+  - Use the modern **`ctx.container` API** with the `durable_object` scheduling policy, not the legacy `Container` / `Sandbox` class. The legacy classes are only maintained through December 31, 2026. Sanity-check this in the Phase 0 spike.
+  - Use **filesystem snapshots** to keep a warm image with dependencies installed, so a merge does not pay for `npm ci` from scratch each time.
+  - **Fast path:** for JS/TS projects where a full container is overkill, a **Dynamic Worker** (Worker Loader) can run the candidate under default-deny network in milliseconds. Containers remain the general path.
+  - **ArtifactFS** can mount the repo lazily to skip a full checkout in the container.
   - This must be a **generative** model. Clef and Jev are decision/classifier models and cannot write merged code, so they are not candidates.
   - `npm install` needs the package registry allowed through an egress handler (or dependencies pre-baked into the image).
-  - Keep the model key in the Worker; the sandbox never sees it (egress injects it).
-  - One sandbox per merge; never share a sandbox across tasks.
+  - Keep the model key in the Worker; the container never sees it (egress injects it, or Secrets Store via AI Gateway).
+  - One container per merge; never share across tasks.
   - Cap model turns/cost and treat repo and test output as untrusted to limit prompt injection.
-- **Consequences:** Requires Workers Paid. Container scheduling policy and snapshots are public beta. Cost is cents per merge, dominated by inference.
+- **Consequences:** Requires Workers Paid. The `durable_object` scheduling policy and snapshots are public beta. Cost is cents per merge, dominated by inference.
 
 ### ADR-015: Deletes, renames, and binaries
 
@@ -252,6 +256,59 @@ updateRef(name, ref, hash) -> void
 - **Decision:** A disconnected client keeps editing. Changes are written to a **local journal on disk**. On reconnect, the client replays the queued changes with their base hashes; the Hub resolves them through the same git-merge path. Nothing is auto-discarded. If a client has been offline for a very long time, the user is prompted rather than silently overridden.
 - **Rationale:** Never blocks work, never loses work.
 - **Consequences:** The client needs a durable local journal and a replay path. Define a soft "very long offline" threshold and the prompt behavior during the build.
+
+### ADR-017: The Hub is built on the Cloudflare Agents SDK
+
+- **Status:** Accepted
+- **Context:** The Hub is a stateful, addressable room: durable state, hibernating WebSockets, scheduled work, callable RPC, and observability. The Agents SDK `Agent` class provides exactly this on Durable Objects.
+- **Decision:** Implement the Hub as an Agents SDK `Agent`, one per repo. Use its SQLite-backed state, hibernating WebSockets, `scheduleEvery`/`schedule` for the checkpoint cadence, `@callable` for RPC, and its built-in queue/retry and observability. Where the framework fights our custom sync protocol, drop to the underlying Durable Object API.
+- **Rationale:** Deletes boilerplate for state, connections, scheduling, RPC, and observability. The SDK is a thin layer over Durable Objects, so we keep control of the hot path.
+- **Consequences:** The Hub depends on the Agents SDK (MIT, Durable Objects based). The raw Durable Object API stays reachable for the sync loop. Validate with a Phase 0 spike (two clients syncing through an `Agent`). The MCP surface uses the same SDK (`McpAgent` / `createMcpHandler`, ADR-013).
+
+### ADR-018: The Artifacts write path is isomorphic-git
+
+- **Status:** Accepted
+- **Context:** The Artifacts Workers binding creates, forks, and inspects repos and mints tokens, but it **cannot read or write files inside a repo**. Commits go through the git protocol.
+- **Decision:** The first `RepoStore` write adapter uses **isomorphic-git** with an in-memory filesystem in a Worker to build commits and push over smart HTTP, using a short-lived token from the binding. Keep a container-git adapter as a fallback and for large trees.
+- **Rationale:** This is the documented pattern. It keeps checkpoints inside the Worker with no container.
+- **Consequences:** Worker memory bounds tree size; push small incremental packs (ADR-006). Verify push behavior near the reported large-pack issue in the Phase 0 spike. Reads and repo lifecycle use the binding.
+
+### ADR-019: Durable Object mechanics: SQLite storage, hibernation, and alarms
+
+- **Status:** Accepted
+- **Decision:** Use **SQLite-backed Durable Objects** (`new_sqlite_classes`), storing the manifest via `ctx.storage.sql.exec`. Hold client WebSockets with the **Hibernation API** (`acceptWebSocket`, `serializeAttachment`/`deserializeAttachment`, `ctx.getWebSockets()`). Use **Durable Object alarms** to drive the checkpoint cadence.
+- **Rationale:** SQLite storage is recommended and GA (10 GB per object, 2 MB per key+value). Hibernation avoids duration charges for idle repos. Alarms do not block hibernation.
+- **Consequences:** Anything needed across hibernation is written to SQLite or a WebSocket attachment. Presence is derived from `ctx.getWebSockets()`.
+
+### ADR-020: Blob transport uses R2 presigned URLs
+
+- **Status:** Accepted
+- **Context:** File content can reach tens of megabytes. Pushing bytes through the Hub WebSocket strains the Durable Object memory and CPU budget.
+- **Decision:** Clients transfer content directly to and from **R2 using presigned PUT/GET URLs** minted by the edge Worker. The Hub WebSocket carries control messages and hashes only (`change { path, baseHash, newHash }`), with small content inline under a threshold (about 256 KB).
+- **Rationale:** Protects the DO budget, scales with file size, and keeps the Hub a control plane rather than a data pipe.
+- **Consequences:** Needs R2 S3 credentials or the Workers presign path at the edge. Content stays content-addressed by `sha256`. Replaces the ADR-012 assumption that full content rides the WebSocket.
+
+### ADR-021: Model access goes through AI Gateway with Secrets Store
+
+- **Status:** Accepted
+- **Decision:** All model calls go through **AI Gateway**, provider-agnostic, with a frontier code model primary and Workers AI as fallback. Provider keys live in **Secrets Store**. Use gateway caching, rate limiting, retries, and fallback.
+- **Rationale:** Resilience, cost control, centralized keys, and observability with configuration instead of code. Keeps the merging agent provider-agnostic (ADR-014).
+- **Consequences:** The merge Workflow calls the gateway, never a provider directly.
+
+### ADR-022: Instrument with Workers Analytics Engine
+
+- **Status:** Accepted
+- **Decision:** Emit metrics to **Workers Analytics Engine** from the start: save-to-visible latency, merges attempted/verified/fallen-back, and per-actor activity. Query with SQL.
+- **Rationale:** The one metric that matters and the moat metric come free, and the Phase 9 merge dataset has a home.
+- **Consequences:** A thin metrics module in `packages/core`, used by the Hub and the merge Workflow. Post-MVP, R2 SQL / Pipelines / R2 Data Catalog and Vectorize extend this into the moat analytics and retrieval layer.
+
+### ADR-023: Abuse resistance is reopened and uses native primitives
+
+- **Status:** Accepted
+- **Context:** Rate limits, CI isolation, and board XSS were deferred in v1 and accepted as risk in `hyphae-context.md`. Native primitives now close most of it cheaply.
+- **Decision:** Reopen the item. Use the **Workers rate limiting binding** per actor and per repo, and **AI Gateway rate limits** per model. Keep CI isolated in per-merge Containers (already the case). Render the live view XSS-safe. The full abuse model still lands in hardening (Phase 7).
+- **Rationale:** Closes the highest-risk deferred item, a runaway agent spoiling the live demo, with configuration rather than code.
+- **Consequences:** Update the accepted-risk note in `hyphae-context.md` once implemented.
 
 ---
 
@@ -290,7 +347,8 @@ Blobs are content-addressed in R2: `blobHash -> bytes`.
 ```
 client -> hub:
   hello   { actorId, repoId, manifestSince? }
-  change  { id, path, baseHash, content, sig }
+  change  { id, path, baseHash, newHash, sig }    # normal path, content by reference (R2)
+  change  { id, path, baseHash, content, sig }    # small files only, inlined under a threshold
   ack     { changeId }
 
 hub -> client:
@@ -305,6 +363,7 @@ hub -> client:
 
 - `POST /repos`, `GET /repos/:name`
 - `GET /repos/:name/manifest`
+- `POST /repos/:name/blobs/presign` (mint a presigned R2 PUT or GET)
 - `GET /blobs/:hash`
 - `POST /repos/:name/commit` (force a checkpoint)
 
@@ -344,15 +403,25 @@ hub -> client:
 
 | Need | Primitive |
 |---|---|
-| Durable versioned storage, git history, clones | **Artifacts** |
-| Live per-repo authority, sync, WebSockets | **Durable Objects** |
+| Durable versioned storage, git history, clones | **Artifacts** (binding for lifecycle and reads, git push for writes, ADR-018) |
+| Live per-repo authority, sync, WebSockets | **Durable Objects** via the **Agents SDK `Agent`** (ADR-017) |
+| Hub state, scheduling, RPC, MCP surface | **Agents SDK** (`Agent`, `McpAgent`, `createMcpHandler`) |
 | Edge API, auth, routing | **Workers** |
-| Blob content, snapshots | **R2** |
+| Blob content and direct transfer | **R2** with presigned URLs (ADR-020) |
 | Durable merge job (resolve + verify + commit) | **Workflows** |
-| Model calls (code-capable) | **Workers AI** via **AI Gateway** |
-| Isolated space to resolve and run tests | **Sandboxes / Containers** |
+| Model calls (code-capable) | **AI Gateway** (frontier model, Workers AI fallback, ADR-021) |
+| Provider key storage | **Secrets Store** |
+| Isolated space to resolve and run tests | **Containers** via `ctx.container`, `durable_object` policy, snapshots (ADR-014) |
+| Fast path for JS/TS verification, untrusted code | **Dynamic Workers** (Worker Loader) |
+| Lazy repo mount in a container | **ArtifactFS** (experimental) |
+| Metrics and the moat dataset signal | **Workers Analytics Engine** (ADR-022) |
+| Abuse resistance | **Rate limiting binding** and AI Gateway limits (ADR-023) |
+| Async fan-out (if needed) | **Queues** |
+| Later: moat analytics and retrieval | **R2 SQL**, **Pipelines**, **R2 Data Catalog**, **Vectorize**, **AI Search** |
+| Later: multi-tenant isolation | **Workers for Platforms** |
 | Metadata, attribution (later) | **D1** |
-| Agent participation | **MCP server + CLI** |
+| Hosting the live view | **Workers Static Assets** |
+| Agent participation | **MCP server + CLI** (Agents SDK MCP) |
 
 ---
 
@@ -378,9 +447,14 @@ hub -> client:
 2. **Model choice:** which code model for the first cut, and the exact merge prompt contract and confidence signal.
 3. **Binary detection:** the exact heuristic.
 4. **Hub restart/replay:** the tested procedure from the last commit plus persisted state.
-5. **Sandbox cost controls:** turn and cost caps, and when to fall back to keep-both.
+5. **Container cost controls:** turn and cost caps, and when to fall back to keep-both.
 6. **"Very long offline" threshold:** the number and the prompt behavior.
-7. **Artifacts limits confirmation:** validate large-push behavior and per-repo storage while building (Q9 chose to defer the spike).
+7. **Artifacts limits confirmation:** validate large-push behavior and per-repo storage while building.
+8. **Agents SDK fit:** whether our custom sync protocol rides the `Agent` class cleanly, or the hot path drops to the raw Durable Object API.
+9. **Artifacts write path:** confirm the isomorphic-git push from a Worker, including behavior near the reported large-pack issue (ADR-018).
+10. **Container API:** confirm `ctx.container` with the `durable_object` policy and snapshots is the right target over the legacy class (ADR-014, ADR-019).
+11. **Identity crypto:** confirm Ed25519 sign/verify in workerd, or standardize on `@noble/ed25519`.
+12. **Blob inline threshold:** confirm the cutover value (proposed about 256 KB) between inline WebSocket content and R2 presigned transfer.
 
 ---
 

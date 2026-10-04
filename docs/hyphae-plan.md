@@ -3,7 +3,7 @@
 - **Status:** Draft
 - **Date:** 2026-10-04
 - **Author:** Christopher Man (cman), with opencode
-- **Basis:** `docs/hyphae-prd.md`, `docs/hyphae-adr.md`, `docs/hyphae-context.md`
+- **Basis:** `docs/hyphae-prd.md`, `docs/hyphae-adr.md`, `docs/hyphae-stack.md`, `docs/hyphae-context.md`
 - **Purpose:** Turn the spec into an ordered, checkpointed build sequence. Every phase ends in something demonstrable.
 
 This plan does not change the design. It schedules it. If the plan and the ADR ever disagree, the ADR wins until a new decision is recorded.
@@ -76,13 +76,13 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 
 **Deliverables**
 
-- Bun workspaces monorepo matching the ADR layout (Part 5).
-- `packages/core`: domain types (`Repo`, `Manifest`, `Change`, `Conflict`, `Actor`).
-- `packages/protocol`: versioned WebSocket and REST message schemas (from ADR Part 4).
+- Bun workspaces monorepo matching the ADR layout (Part 5). Concrete tools are pinned in `docs/hyphae-stack.md`.
+- `packages/core`: domain types (`Repo`, `Manifest`, `Change`, `Conflict`, `Actor`) plus the metrics module (Analytics Engine).
+- `packages/protocol`: versioned WebSocket and REST message schemas (from ADR Part 4), including the presigned blob endpoints.
 - `packages/repostore`: the `RepoStore` port plus two adapters, an in-memory one and an R2 one.
-- `wrangler.toml` with R2 bucket binding and a placeholder Durable Object binding.
-- Tooling: TypeScript config, a linter, a test runner, a `dev` script.
-- `infra/` layout for Container, Workflow, and AI Gateway config (empty but present).
+- `wrangler.toml` with R2 bucket binding, an Agents SDK `Agent` binding, and an Artifacts binding.
+- Tooling: TypeScript config, Biome, the test runners, a `dev` script.
+- `infra/` layout for the Container image, Workflow, AI Gateway, and Analytics Engine config (empty but present).
 
 **Tasks**
 
@@ -90,14 +90,23 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 2. Write the domain types and the protocol schemas first, as the contract everything codes against.
 3. Define the `RepoStore` interface exactly as ADR-007 (keep it minimal).
 4. Implement the in-memory adapter and the R2 adapter.
-5. Stand up a hello Worker with `wrangler dev` and a stub Durable Object.
+5. Bind Artifacts and stand up a hello Worker plus a stub Agents SDK `Agent` with `wrangler dev`.
+
+**Spikes (time-boxed, run in parallel, results feed the ADRs)**
+
+1. **isomorphic-git commit and push to Artifacts from a Worker** (ADR-018). The biggest unknown.
+2. **Agents SDK `Agent` as the Hub** carrying our two-client sync protocol (ADR-017).
+3. **`ctx.container` plus a snapshot**, running `npm ci && npm test` with an egress allowlist (ADR-014).
+4. **R2 presigned PUT/GET** round trip from the client (ADR-020).
+5. **AI Gateway** to a frontier model with a Workers AI fallback and a Secrets Store key (ADR-021).
+6. **Ed25519** sign/verify in workerd, or confirm `@noble/ed25519` (ADR-009).
 
 > **Checkpoint 0: The skeleton stands**
-> - **You can demonstrate:** `bun test` passes across all packages, `wrangler dev` boots a Worker that hits the R2 adapter, and the `RepoStore` interface is frozen.
-> - **Exit criteria:** types compile; in-memory and R2 adapters both pass the same port test suite; protocol schemas have version numbers.
+> - **You can demonstrate:** `bun test` passes across all packages, `wrangler dev` boots a Worker that hits the R2 adapter, the `RepoStore` interface is frozen, and each spike has a yes/no answer recorded.
+> - **Exit criteria:** types compile; in-memory and R2 adapters both pass the same port test suite; protocol schemas have version numbers; the six spikes are resolved.
 > - **Gate:** Phases 1 to 6 can now code against stable contracts.
 
-**Risks:** Over-engineering the types. Keep them thin, shaped like the ADR data model.
+**Risks:** Over-engineering the types, and beta churn in the Agents SDK, Containers, and Dynamic Workers. Keep them behind seams.
 
 ---
 
@@ -131,37 +140,37 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 
 ---
 
-### Phase 2: The Hub and the live loop (`M`)
+### Phase 2: The Hub and the live loop (`S-M` with the Agents SDK, `M` without)
 
-**Goal:** A Durable Object that is the live authority for one repo, with a working sync loop and broadcast.
+**Goal:** The live authority for one repo, built on the Agents SDK, with a working sync loop and broadcast.
 
-**Why now:** This is the single-authority core (ADR-003) that everything else talks to.
+**Why now:** This is the single-authority core (ADR-003) that everything else talks to. The Agents SDK (ADR-017) should shrink this phase.
 
 **Deliverables**
 
-- `workers/hub-do`: the Hub Durable Object.
-  - Holds the manifest (`path -> { blobHash, version, updatedBy, updatedAt }`).
+- `workers/hub-do`: the Hub, as an Agents SDK `Agent` (ADR-017).
+  - Holds the manifest (`path -> { blobHash, version, updatedBy, updatedAt }`) in SQLite-backed DO storage (ADR-019).
   - Handles `hello`, `change`, `ack`; emits `manifest`, `changed`, `conflict`, `resolved`, `presence` (ADR-012).
-  - Accepts a change, stores the blob in R2, updates the manifest, broadcasts.
+  - Accepts a change whose content is already in R2 (ADR-020), updates the manifest, broadcasts.
   - On a stale `baseHash`, runs `mergeFile`, accepts a clean merge, or marks a conflict.
-  - Persists its state durably (so a restart can replay).
-- `workers/edge`: auth stub, routing, REST endpoints, WebSocket upgrade to the Hub.
-- Presence: who is connected, who touched what.
+  - Uses hibernating WebSockets and persists state across hibernation (ADR-019).
+- `workers/edge`: auth stub, routing, REST endpoints, WebSocket upgrade, and the R2 presign endpoint (ADR-020).
+- Presence: who is connected, who touched what, from `ctx.getWebSockets()`.
 
 **Tasks**
 
 1. Implement the manifest and change handling, persist before broadcast, dedupe by change id.
-2. Wire the WebSocket protocol end to end.
+2. Wire the WebSocket protocol end to end on the `Agent` class.
 3. Add the conflict path that calls `packages/merge`.
-4. Add REST: `POST /repos`, `GET /repos/:name/manifest`, `GET /blobs/:hash`.
-5. Integration tests with Miniflare: two WebSocket clients, one repo, sync and conflict.
+4. Add REST: `POST /repos`, `GET /repos/:name/manifest`, `POST /repos/:name/blobs/presign`.
+5. Integration tests with the Cloudflare Vitest integration: two WebSocket clients, one repo, sync and conflict.
 
 > **Checkpoint 2: Two clients, one Hub**
-> - **You can demonstrate:** two scripted WebSocket clients editing the same repo through the Hub. One writes, the other receives. A stale write that is disjoint merges cleanly; a same-line write yields a conflict.
-> - **Exit criteria:** integration tests pass; a Hub restart reconstructs the manifest; blobs land in R2 content-addressed.
+> - **You can demonstrate:** two scripted WebSocket clients editing the same repo through the Hub. One writes, the other receives. A stale write that is disjoint merges cleanly; a same-line write yields a conflict. Blobs move via R2, not the WebSocket.
+> - **Exit criteria:** integration tests pass; a Hub restart reconstructs the manifest; blobs land in R2 content-addressed; the `Agent` carries our protocol without fighting it.
 > - **Gate:** the client watcher has a real server to talk to.
 
-**Risks:** Durable Object state and WebSocket lifecycle edge cases. Test reconnect and duplicate delivery explicitly.
+**Risks:** Whether our custom protocol fits the Agents SDK cleanly; if not, the hot path drops to the raw Durable Object API. Test reconnect, hibernation, and duplicate delivery explicitly.
 
 ---
 
@@ -186,7 +195,7 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 1. Watch a folder and log normalized change events after debounce.
 2. Diff against last synced state to find genuine edits.
 3. Echo suppression via own-write hash set.
-4. Send changes to the Hub; apply received changes atomically.
+4. Upload changed content to R2 via a presigned URL, send the hash to the Hub (ADR-020), and apply received changes atomically.
 5. Stress it: a script that writes many files rapidly, an editor autosave loop, a large file.
 6. Prove no echo loop and no lost change under churn.
 
@@ -207,8 +216,8 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 
 **Deliverables**
 
-- The Artifacts adapter implementing `RepoStore`.
-- Checkpoint scheduler in the Hub: quiescence about 30 seconds, ceiling about 5 minutes, plus a manual trigger.
+- The Artifacts adapter implementing `RepoStore`: the binding for lifecycle and reads, **isomorphic-git** in the Worker to commit and push (ADR-018).
+- Checkpoint scheduler in the Hub (Agents SDK scheduling over DO alarms): quiescence about 30 seconds, ceiling about 5 minutes, plus a manual trigger.
 - `POST /repos/:name/commit` forced checkpoint.
 - Hub restart and replay from the last commit plus persisted state.
 - A `git clone` verification path.
@@ -239,9 +248,10 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 
 - `workers/merge-workflow`: a Workflow that:
   1. Takes a conflict (base, ours, theirs).
-  2. Calls a generative code model through AI Gateway (Workers AI or an external provider).
-  3. Boots a Sandbox per merge, writes the candidate, runs build/tests.
+  2. Calls a generative code model through **AI Gateway** (frontier model primary, Workers AI fallback, key from Secrets Store, ADR-021).
+  3. Boots a per-merge **Container via `ctx.container`** (`durable_object` policy, restored from a warm **snapshot**), writes the candidate, runs build/tests.
   4. Commits and broadcasts **only on green**; otherwise keeps both and surfaces.
+- A **Dynamic Workers fast path** for JS/TS projects where a full container is overkill (ADR-014 notes).
 - Test command detection (this resolves open question 1): read `package.json` scripts or a per-repo config, fall back to build only.
 - Model choice and prompt contract with a confidence signal (this resolves open question 2).
 - Cost and turn caps with a keep-both fallback (this resolves open question 5).
@@ -249,19 +259,20 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 
 **Tasks**
 
-1. Stand up the Container/Sandbox image and prove `npm ci && npm test` runs.
+1. Build the Container image with dependencies, and create a snapshot for warm starts (ADR-014).
 2. Allow the package registry through an egress handler (or pre-bake dependencies).
-3. Keep the model key in the Worker; the sandbox never sees it.
+3. Keep the model key out of the container (Secrets Store via AI Gateway, or edge-injected egress).
 4. Build the Workflow steps with retries and durable state.
 5. Implement the green-only commit rule and the keep-both fallback.
-6. Test: a cleanly resolvable same-line conflict, and a conflict whose merge fails tests.
+6. Add the Dynamic Workers fast path for JS/TS and measure where it is sufficient.
+7. Test: a cleanly resolvable same-line conflict, and a conflict whose merge fails tests.
 
 > **Checkpoint 5: The AI proves it (the hero moment)**
-> - **You can demonstrate:** two clients change the same lines of a file. The conflict goes to the Workflow, the model produces a merge, the sandbox runs the tests, and on green both machines converge on the verified result. Then show a case where tests fail and both sides are kept.
-> - **Exit criteria:** green commit path works; failing path keeps both and surfaces; cost per merge measured in cents; one sandbox per merge enforced.
+> - **You can demonstrate:** two clients change the same lines of a file. The conflict goes to the Workflow, the model produces a merge, the container runs the tests, and on green both machines converge on the verified result. Then show a case where tests fail and both sides are kept.
+> - **Exit criteria:** green commit path works; failing path keeps both and surfaces; cost per merge measured in cents; one container per merge enforced; warm starts from a snapshot.
 > - **Gate:** the demo line is reached. The wow is complete.
 
-**Risks:** Sandbox cold start, npm egress, prompt injection from repo contents. Cap output and gate on tests.
+**Risks:** Container cold start (mitigated by snapshots), npm egress, prompt injection from repo contents. Cap output and gate on tests.
 
 ---
 
@@ -274,13 +285,13 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 **Deliverables**
 
 - `apps/cli`: `init`, `join`, `up`, `status`, `log`. Human-friendly output.
-- `apps/mcp`: an MCP server exposing repo state, history, presence, and checkpoint tools so any agent harness can participate without changing its workflow.
+- `apps/mcp`: an MCP server on the Agents SDK (`McpAgent` / `createMcpHandler`, ADR-017) exposing repo state, history, presence, and checkpoint tools so any agent harness can participate without changing its workflow.
 - `apps/web`: the live view, a thin client of the same WebSocket feed (connected actors, files changing, merges, tests passing, recent commits).
 
 **Tasks**
 
 1. Finish the CLI around the Phase 3 daemon.
-2. Implement the MCP server against the stable protocol.
+2. Implement the MCP server with the Agents SDK against the stable protocol.
 3. Polish the live view for the big screen.
 4. End-to-end test: a real agent harness edits files and the changes flow with no Hyphae-specific tooling.
 
@@ -301,10 +312,11 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 
 **Deliverables**
 
-- **Identity (ADR-009, Q7):** per-actor key on join (Ed25519 via WebCrypto, HMAC fallback), signed changes, Hub verification, a removed list for revocation.
+- **Identity (ADR-009, Q7):** per-actor key on join (`@noble/ed25519`, WebCrypto if verified, HMAC fallback), signed changes, Hub verification, a removed list for revocation.
 - **Offline (ADR-016, Q6):** durable local journal, replay and merge on reconnect, a soft "very long offline" prompt (this resolves open question 6).
 - **Deletes and renames (ADR-015, Q5):** tombstones, content-hash rename detection, edit-wins on delete-vs-edit.
 - **Binaries (ADR-015, Q8):** replace, keep both on concurrent change, conflict-copy naming.
+- **Abuse resistance (ADR-023):** the Workers rate limiting binding per actor and per repo, AI Gateway model limits, and XSS-safe rendering on the live view.
 - **Security loose ends (from `hyphae-context.md`):**
   - Path-jail the client (reject `..`, absolute paths, symlink escapes, dangerous files like `.git/hooks`).
   - Secret scanning at intake with a narrow redaction exception that keeps a tombstone.
@@ -316,14 +328,15 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 2. Offline journal and replay, tested by disconnecting mid-edit.
 3. Delete/rename/binary rules with tests.
 4. Path jail, secret scan, read-only remote.
-5. Binary detection heuristic finalized (open question 3).
+5. Add rate limiting per actor and per repo (ADR-023).
+6. Binary detection heuristic finalized (open question 3).
 
 > **Checkpoint 7: It holds up**
 > - **You can demonstrate:** an unsigned or removed actor is rejected; an offline laptop reconnects and merges without loss; a delete-vs-edit keeps the edit; a client is blocked from writing outside the project.
 > - **Exit criteria:** all hardening tests pass; the accepted-risk list in `hyphae-context.md` is closed or explicitly re-accepted with a note.
 > - **Gate:** release readiness.
 
-**Risks:** Identity crypto in workerd. WebCrypto Ed25519 is available; the HMAC fallback covers gaps.
+**Risks:** Identity crypto in workerd. Use `@noble/ed25519` to avoid depending on WebCrypto Ed25519; the HMAC fallback covers gaps.
 
 ---
 
@@ -359,8 +372,8 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 **Deliverables**
 
 - Every merge is logged: inputs, model output, test result, and human disposition if any.
-- A merge-record store (start in D1 or R2) and a simple report of verification rate.
-- A path to improve the merge model from the record (fine-tune or retrieval).
+- A merge-record store (Analytics Engine for metrics, R2 or R2 SQL for the records) and a simple report of verification rate.
+- A path to improve the merge model from the record (fine-tune or retrieval with Vectorize).
 - A metric: verified-merge success rate over time.
 
 **Tasks**
@@ -384,7 +397,8 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 - **Multi-repo and cross-repo awareness.**
 - **GitHub / GitLab bridge.**
 - **D1 metadata layer** for attribution and analytics.
-- **Abuse resistance:** per-actor rate limits, runaway-agent auto-pause, CI isolation, XSS-safe rendering (the deferred items in `hyphae-context.md`).
+- **Abuse resistance (remaining):** runaway-agent auto-pause, broader CI isolation, and hardening beyond the ADR-023 baseline.
+- **Moat analytics and retrieval:** R2 Data Catalog, Pipelines, R2 SQL, Vectorize, AI Search.
 
 > **Checkpoint 10: Scoped and deferred**
 > - **You can demonstrate:** a written decision on which of these is next and why.
@@ -418,9 +432,10 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 | Merge library edge cases (CRLF, unicode, binary) | 1 | Fixtures and property tests before the Hub uses it | Checkpoint 1 |
 | Durable Object throughput or memory ceiling | 2, 10 | Manifest only in the Hub; sharding is a future option | Checkpoint 2, deferred |
 | Artifacts beta limits or push bug | 4 | `RepoStore` seam, incremental packs | Checkpoint 4 |
-| Sandbox cold start, npm egress, cost | 5 | Pre-baked deps or egress rules, per-merge sandbox, cost caps | Checkpoint 5 |
+| Container cold start, npm egress, cost | 5 | Warm snapshots, egress rules, per-merge container, cost caps | Checkpoint 5 |
 | Prompt injection from repo or test output | 5, 7 | Cap output, gate on green tests, optional human approval | Checkpoints 5, 7 |
-| Identity crypto in workerd | 7 | Ed25519 WebCrypto, HMAC fallback | Checkpoint 7 |
+| Identity crypto in workerd | 7 | `@noble/ed25519` or WebCrypto, HMAC fallback | Checkpoint 7 |
+| Beta churn (Agents SDK, Containers, Dynamic Workers) | 2 to 6 | Keep each behind a seam (`RepoStore`, merge verifier, protocol) | Continuous |
 | Scope creep in surfaces | 6 | Keep CLI and live view thin clients | Checkpoint 6 |
 | Copyable design, no durable moat | 9 | Compound the verified-merge dataset | Checkpoint 9 |
 | Loss of work anywhere in the system | all | Save before broadcast, keep both, never auto-discard | Every checkpoint |
@@ -437,14 +452,19 @@ From the ADR Part 7.2 and `hyphae-context.md`. Each one gets resolved in a speci
 | 2. Model choice and prompt contract | Phase 5 |
 | 3. Binary detection heuristic | Phase 7 |
 | 4. Hub restart and replay | Phase 4 |
-| 5. Sandbox cost controls | Phase 5 |
+| 5. Container cost controls | Phase 5 |
 | 6. "Very long offline" threshold | Phase 7 |
 | 7. Artifacts limits confirmation | Phase 4 |
+| 8. Agents SDK protocol fit | Phase 0 spike, Phase 2 |
+| 9. Artifacts write path (isomorphic-git push) | Phase 0 spike, Phase 4 |
+| 10. Container API (`ctx.container` vs legacy) | Phase 0 spike, Phase 5 |
+| 11. Identity crypto (Ed25519) | Phase 0 spike, Phase 7 |
+| 12. Blob inline threshold | Phase 0 spike, Phase 2 |
 | Loose end: path-jail the client | Phase 7 |
 | Loose end: secret scanning and redaction | Phase 7 |
 | Loose end: read-only git remote for members | Phase 7 |
 | Loose end: revert semantics | Phase 7 (or deferred) |
-| Deferred risk: abuse resistance | Phase 10 (revisit) |
+| Abuse resistance baseline (ADR-023) | Phase 7 |
 
 ---
 
