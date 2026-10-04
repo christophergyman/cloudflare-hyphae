@@ -7,6 +7,7 @@
  * instance. One Hub per repo: the repo name is the agent name.
  */
 
+import { sha256Hex } from "@hyphae/core";
 import { routeAgentRequest } from "agents";
 
 export interface Env {
@@ -74,7 +75,7 @@ export default {
     // PUT (ADR-020); this direct endpoint keeps the client simple for now.
     if (url.pathname === "/blobs" && request.method === "PUT") {
       const bytes = new Uint8Array(await request.arrayBuffer());
-      const hash = await sha256HexEdge(bytes);
+      const hash = await sha256Hex(bytes);
       await env.BLOBS.put(hash, bytes);
       return Response.json({ hash });
     }
@@ -105,13 +106,6 @@ export default {
     return Response.json({ error: "not_found" }, { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
-
-async function sha256HexEdge(bytes: Uint8Array): Promise<string> {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  const digest = await crypto.subtle.digest("SHA-256", copy);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 // Re-export the Hub so the Durable Object class is available to the Worker.
 export { Hub } from "@hyphae/hub";

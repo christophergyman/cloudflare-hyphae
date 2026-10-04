@@ -5,6 +5,7 @@
   "type": "module",
   "main": "src/index.ts",
   "dependencies": {
+    "@hyphae/core": "workspace:*",
     "@hyphae/hub": "workspace:*",
     "agents": "^0.26.0"
   }

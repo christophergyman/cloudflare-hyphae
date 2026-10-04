@@ -18,3 +18,14 @@ export type {
 export { defaultConflictMarkers, MergeAgent } from "./agent.ts";
 export type { DetectionInput, DetectionResult } from "./detect.ts";
 export { detectTestCommand } from "./detect.ts";
+export type { AiBindingLike, OpenAiMergeModelOptions } from "./model.ts";
+export {
+  buildMergePrompt,
+  createAiMergeModel,
+  DEFAULT_MERGE_MODEL,
+  extractText,
+  MERGE_SYSTEM_PROMPT,
+  stripFences,
+} from "./model.ts";
+export type { CreateMergeRunnerOptions, MergeJob, MergeJobResult, SandboxLike } from "./runner.ts";
+export { createMergeRunner } from "./runner.ts";

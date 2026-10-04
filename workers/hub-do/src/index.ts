@@ -12,8 +12,12 @@
  */
 
 import type { Change, ManifestEntry } from "@hyphae/core";
+import { sha256Hex } from "@hyphae/core";
+import type { AiBindingLike } from "@hyphae/merge-agent";
+import { createMergeRunner } from "@hyphae/merge-agent";
+import type { HistoryEvent } from "@hyphae/protocol";
 import { parseClientMessage } from "@hyphae/protocol";
-import type { RepoStore } from "@hyphae/repostore";
+import type { ArtifactsLike, R2BucketLike, RepoStore } from "@hyphae/repostore";
 import { ArtifactsRepoStore } from "@hyphae/repostore";
 import { Agent } from "agents";
 import { CheckpointScheduler } from "./checkpoint.ts";
@@ -33,7 +37,7 @@ export interface HubEnv {
    * {@link RepoStore} from it on first checkpoint, so durable history works
    * with no extra wiring.
    */
-  ARTIFACTS?: ArtifactsBindingLike;
+  ARTIFACTS?: ArtifactsLike;
   /**
    * Runs a conflict job (the verified merge Workflow, ADR-014). Optional: when
    * absent, conflicts are simply surfaced and resolved by a human.
@@ -45,20 +49,6 @@ export interface HubEnv {
   MODEL?: string;
   /** Optional per-repo test command for verification. */
   TEST_COMMAND?: string;
-}
-
-/** Minimal structural view of the Workers AI binding. */
-export interface AiBindingLike {
-  run(model: string, options: unknown): Promise<unknown>;
-}
-
-/** Minimal structural view of the Artifacts Workers binding. */
-export interface ArtifactsBindingLike {
-  create(name: string): Promise<{ name: string; remote: string; token: string }>;
-  get(name: string): Promise<{
-    info(): Promise<{ remote: string } | null>;
-    createToken(scope?: "read" | "write", ttl?: number): Promise<string>;
-  }>;
 }
 
 /**
@@ -75,12 +65,6 @@ export interface MergeRunner {
   }>;
 }
 
-/** Minimal R2 surface the Hub needs (keeps this free of binding types). */
-export interface R2BucketLike {
-  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
-  put(key: string, value: Uint8Array): Promise<unknown>;
-}
-
 /** Per-connection state, persisted with the hibernating WebSocket. */
 export interface ConnectionState {
   actorId: string;
@@ -88,16 +72,6 @@ export interface ConnectionState {
   kind: "human" | "agent";
   /** A read-only participant (the live view); does not count as an editor. */
   observer?: boolean;
-}
-
-/** One event in the recent-activity feed (replayed on connect). */
-export interface HistoryEvent {
-  kind: "change" | "conflict" | "resolved" | "merge" | "delete";
-  path?: string;
-  by?: string;
-  detail?: string;
-  version?: number;
-  at: number;
 }
 
 const MANIFEST_KEY = "manifest";
@@ -152,45 +126,31 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
 
   /**
    * The merge runner. Uses an explicit `MERGE` binding if given, otherwise
-   * builds one from the Workers AI binding. Returns null when neither is
-   * available, so conflicts are simply surfaced (never lost).
+   * builds one from the Workers AI binding through the shared merge-agent
+   * wiring. Returns null when neither is available, so conflicts are simply
+   * surfaced (never lost).
+   *
+   * No sandbox is configured here, so the agent refuses to verify and keeps
+   * both sides rather than accepting unverified model output (ADR-014). The
+   * merge is still attempted: a confident, clean model result is surfaced as
+   * "resolved by agent" (unverified), never as "verified".
    */
   private mergeRunner(): MergeRunner | null {
     if (this.env.MERGE) return this.env.MERGE;
-    if (!this.env.AI) return null;
     const ai = this.env.AI;
-    const model = this.env.MODEL ?? "@cf/moonshotai/kimi-k2.7-code";
+    if (!ai) return null;
+    const runner = createMergeRunner({
+      ai: { run: (model, options) => ai.run(model, options) },
+      model: this.env.MODEL,
+      testCommand: this.env.TEST_COMMAND,
+    });
     return {
       async run(job) {
-        const result = await ai.run(model, {
-          messages: [
-            {
-              role: "system",
-              content:
-                "You resolve git merge conflicts. Output ONLY the fully merged file content. No conflict markers, no explanation, no code fences.",
-            },
-            {
-              role: "user",
-              content: [
-                "Resolve this merge conflict.",
-                "",
-                "--- BASE ---",
-                job.base,
-                "--- OURS ---",
-                job.ours,
-                "--- THEIRS ---",
-                job.theirs,
-                "",
-                "Return the merged file.",
-              ].join("\n"),
-            },
-          ],
-        });
-        const content = stripFences(extractText(result));
-        if (content.trim().length === 0) {
-          return { status: "kept-both", reason: "model returned empty content" };
+        const outcome = await runner.run(job);
+        if (outcome.status === "merged") {
+          return { status: "merged", content: outcome.content, verified: outcome.verified };
         }
-        return { status: "merged", content };
+        return { status: "kept-both", reason: outcome.reason };
       },
     };
   }
@@ -455,7 +415,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
     }
 
     const bytes = new TextEncoder().encode(outcome.content);
-    const hash = await sha256HexBytes(bytes);
+    const hash = await sha256Hex(bytes);
     await this.env.BLOBS?.put(hash, bytes);
 
     const core = this.ensureCore();
@@ -572,7 +532,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
 
   private async storeInline(base64: string): Promise<string> {
     const bytes = base64ToBytes(base64);
-    const hash = await sha256HexBytes(bytes);
+    const hash = await sha256Hex(bytes);
     await this.env.BLOBS?.put(hash, bytes);
     return hash;
   }
@@ -599,36 +559,4 @@ function base64ToBytes(base64: string): Uint8Array {
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
-}
-
-async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  const digest = await crypto.subtle.digest("SHA-256", copy);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Remove a ```lang fence if the model wrapped its answer in one. */
-function stripFences(text: string): string {
-  const match = text.match(/^\s*```[a-zA-Z0-9]*\n([\s\S]*?)\n?```\s*$/);
-  return match?.[1] ?? text;
-}
-
-/**
- * Extract the assistant text from a Workers AI response. Different models
- * return either `{ response }` (text-generation style) or the OpenAI-style
- * `{ choices: [{ message: { content } }] }`. Handle both.
- */
-function extractText(result: unknown): string {
-  if (typeof result === "string") return result;
-  if (result && typeof result === "object") {
-    const r = result as {
-      response?: unknown;
-      choices?: { message?: { content?: unknown } }[];
-    };
-    if (typeof r.response === "string") return r.response;
-    const content = r.choices?.[0]?.message?.content;
-    if (typeof content === "string") return content;
-  }
-  return "";
 }

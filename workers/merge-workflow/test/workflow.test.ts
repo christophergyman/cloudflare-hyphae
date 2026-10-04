@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
-  buildPrompt,
+  buildMergePrompt,
   type MergeWorkflowEnv,
   runConflictJob,
   type SandboxLike,
@@ -88,9 +88,9 @@ describe("runConflictJob", () => {
   });
 });
 
-describe("buildPrompt", () => {
+describe("buildMergePrompt", () => {
   it("includes base, ours, and theirs", () => {
-    const p = buildPrompt({ base: "BASE", ours: "OURS", theirs: "THEIRS" });
+    const p = buildMergePrompt({ base: "BASE", ours: "OURS", theirs: "THEIRS" });
     expect(p).toContain("BASE");
     expect(p).toContain("OURS");
     expect(p).toContain("THEIRS");

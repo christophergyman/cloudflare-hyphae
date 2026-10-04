@@ -163,8 +163,8 @@ export const errorMessageSchema = z.object({
 
 /** One entry in the recent-activity feed the Hub replays on connect. */
 export const historyEventSchema = z.object({
-  /** Event kind: change, conflict, resolved, merge, presence. */
-  kind: z.string(),
+  /** Event kind: change, conflict, resolved, merge, delete. */
+  kind: z.enum(["change", "conflict", "resolved", "merge", "delete"]),
   path: z.string().optional(),
   by: z.string().optional(),
   detail: z.string().optional(),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { MemoryFS } from "../src/artifacts.ts";
+import { MemoryFS } from "../src/memory-fs.ts";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();

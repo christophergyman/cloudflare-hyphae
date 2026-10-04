@@ -63,6 +63,5 @@ Container (`ctx.container`) and push from there. The port in
 | File | Purpose |
 |---|---|
 | `scripts/local-push.ts` | Runnable harness, smart-HTTP push, no credentials |
-| `src/worker.ts` | The Artifacts Worker (needs an Artifacts binding) |
-| `src/memory-fs.ts` | In-memory FS vendored from Cloudflare's example |
+| `src/worker.ts` | The Artifacts Worker (needs an Artifacts binding); uses `MemoryFS` from `@hyphae/repostore` |
 | `wrangler.toml` | Worker config with the `artifacts` binding |

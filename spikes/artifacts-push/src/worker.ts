@@ -17,7 +17,7 @@
 
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
-import { MemoryFS } from "./memory-fs.ts";
+import { MemoryFS } from "@hyphae/repostore";
 
 export interface Env {
   ARTIFACTS: Artifacts;

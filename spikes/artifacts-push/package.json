@@ -7,8 +7,8 @@
     "local": "bun run scripts/local-push.ts"
   },
   "dependencies": {
-    "isomorphic-git": "^1.43.0",
-    "memfs": "^4.80.0"
+    "@hyphae/repostore": "workspace:*",
+    "isomorphic-git": "^1.43.0"
   },
   "devDependencies": {
     "node-git-server": "^1.0.0"
