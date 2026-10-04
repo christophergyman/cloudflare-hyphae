@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+// Use the production wrapper rather than reimplementing it here.
+import { parseClientMessageSafe } from "../../../workers/hub-do/src/helpers.ts";
 import {
   PROTOCOL_VERSION,
   parseClientMessage,
@@ -49,7 +51,7 @@ describe("protocol", () => {
       path: "x",
       baseHash: null,
     });
-    expect(result).toBe(false);
+    expect(result.ok).toBe(false);
   });
 
   it("accepts a tombstone (newHash null, no content)", () => {
@@ -72,7 +74,7 @@ describe("protocol", () => {
         baseHash: null,
         newHash: "abc",
         contentBase64: "aGk=",
-      }),
+      }).ok,
     ).toBe(false);
   });
 
@@ -85,7 +87,7 @@ describe("protocol", () => {
         baseHash: null,
         newHash: null,
         contentBase64: "aGk=",
-      }),
+      }).ok,
     ).toBe(false);
   });
 
@@ -104,12 +106,3 @@ describe("protocol", () => {
     expect(safeParseHubMessage({ type: "nope" }).success).toBe(false);
   });
 });
-
-function parseClientMessageSafe(raw: unknown): boolean {
-  try {
-    parseClientMessage(raw);
-    return true;
-  } catch {
-    return false;
-  }
-}

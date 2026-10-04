@@ -136,11 +136,11 @@ export function blobStorePortSuite(name: string, makeStore: () => BlobStore): vo
       expect(await store.get("nope")).toBeNull();
     });
 
-    it("overwrites the same key idempotently", async () => {
+    it("overwrites the same key with new content", async () => {
       const store = makeStore();
-      await store.put("h2", enc.encode("a"));
-      await store.put("h2", enc.encode("a"));
-      expect(dec.decode((await store.get("h2")) as Uint8Array)).toBe("a");
+      await store.put("h2", enc.encode("old"));
+      await store.put("h2", enc.encode("new"));
+      expect(dec.decode((await store.get("h2")) as Uint8Array)).toBe("new");
     });
 
     it("does not alias caller buffers or returned buffers", async () => {

@@ -6,17 +6,11 @@ import {
   type SandboxLike,
 } from "../src/index.ts";
 
-function envWithModel(answer: string | null): MergeWorkflowEnv {
-  return {
-    AI: {
-      async run() {
-        return { response: answer ?? undefined };
-      },
-    },
-    Sandbox: fakeSandbox(true),
-    TEST_COMMAND: "bun test",
-  };
-}
+/**
+ * One wiring test proving `runConflictJob` drives the shared runner end to end
+ * and maps its outcome. The full decision matrix lives once in
+ * `packages/merge-agent/test/decisions.test.ts`.
+ */
 
 function fakeSandbox(green: boolean): SandboxLike {
   const files = new Map<string, string>();
@@ -34,7 +28,15 @@ function fakeSandbox(green: boolean): SandboxLike {
 
 describe("runConflictJob", () => {
   it("accepts a model merge that passes tests", async () => {
-    const env = envWithModel("a\nMERGED\nc\n");
+    const env: MergeWorkflowEnv = {
+      AI: {
+        async run() {
+          return { response: "a\nMERGED\nc\n" };
+        },
+      },
+      Sandbox: fakeSandbox(true),
+      TEST_COMMAND: "bun test",
+    };
     const out = await runConflictJob(env, {
       repoId: "r",
       path: "f.txt",
@@ -43,48 +45,8 @@ describe("runConflictJob", () => {
       theirs: "a\nTHEIRS\nc\n",
     });
     expect(out.status).toBe("merged");
+    expect(out.path).toBe("f.txt");
     expect(out.content).toBe("a\nMERGED\nc\n");
-  });
-
-  it("keeps both when the model abstains", async () => {
-    const env = envWithModel(null);
-    const out = await runConflictJob(env, {
-      repoId: "r",
-      path: "f.txt",
-      base: "a\n",
-      ours: "a\n",
-      theirs: "a\n",
-    });
-    expect(out.status).toBe("kept-both");
-  });
-
-  it("keeps both when tests fail", async () => {
-    const env: MergeWorkflowEnv = {
-      AI: {
-        async run() {
-          return { response: "bad merge" };
-        },
-      },
-      Sandbox: fakeSandbox(false),
-      TEST_COMMAND: "bun test",
-    };
-    const out = await runConflictJob(env, {
-      repoId: "r",
-      path: "f.txt",
-      base: "a\n",
-      ours: "a\n",
-      theirs: "a\n",
-    });
-    expect(out.status).toBe("kept-both");
-    expect(out.reason).toContain("tests failed");
-  });
-
-  it("keeps both when no model is configured", async () => {
-    const out = await runConflictJob(
-      { Sandbox: fakeSandbox(true) },
-      { repoId: "r", path: "f.txt", base: "", ours: "a", theirs: "b" },
-    );
-    expect(out.status).toBe("kept-both");
   });
 });
 

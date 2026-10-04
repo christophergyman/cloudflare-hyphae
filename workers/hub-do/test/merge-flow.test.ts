@@ -7,9 +7,9 @@ import {
 } from "@hyphae/merge-agent";
 
 /**
- * Proves the full verified-merge decision flow end to end, the way the Hub's
- * MergeRunner drives it: a conflict goes to the model, the sandbox runs tests,
- * and only a green result is accepted.
+ * One wiring test proving the Hub's merge path drives the shared merge agent
+ * end to end. The full decision matrix lives once in
+ * `packages/merge-agent/test/decisions.test.ts`.
  */
 
 function buildAgent(modelContent: string | null, green: boolean, confidence?: number) {
@@ -35,20 +35,6 @@ describe("verified merge flow", () => {
     if (out.status === "merged") {
       expect(out.content).toBe("export const value = 42;\n");
       expect(out.verified).toBe(true);
-    }
-  });
-
-  it("keeps both when the merge breaks the tests", async () => {
-    const agent = buildAgent("export const value = ;\n", false);
-    const out = await agent.resolve({
-      path: "src/value.ts",
-      base: "export const value = 1;\n",
-      ours: "export const value = 40;\n",
-      theirs: "export const value = 2;\n",
-    });
-    expect(out.status).toBe("kept-both");
-    if (out.status === "kept-both") {
-      expect(out.conflictMarkers).toContain("<<<<<<< ours");
     }
   });
 });

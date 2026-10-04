@@ -54,18 +54,30 @@ function commit(core: HubCore, blobs: SharedBlobs, client: Client, path: string,
 }
 
 describe("two clients through one HubCore", () => {
-  it("converges on a live edit with no conflict", async () => {
+  it("converges when a second client edits after learning the first", async () => {
     const core = new HubCore({ repoId: "r" });
     const blobs = new SharedBlobs();
     const a: Client = { actorId: "a", lastKnown: new Map(), files: new Map() };
     const b: Client = { actorId: "b", lastKnown: new Map(), files: new Map() };
 
-    const r = await commit(core, blobs, a, "readme.md", "# hello\n");
-    expect(r.status).toBe("accepted");
-    // B learns the new version.
-    b.lastKnown.set("readme.md", r.entry?.blobHash ?? null);
+    // A creates the file.
+    const first = await commit(core, blobs, a, "readme.md", "# hello\n");
+    expect(first.status).toBe("accepted");
+    // B learns A's version before editing.
+    b.lastKnown.set("readme.md", first.entry?.blobHash ?? null);
 
-    expect(core.get("readme.md")?.version).toBe(1);
+    // B edits from the learned version: no conflict, the version advances.
+    const second = await commit(core, blobs, b, "readme.md", "# hello from b\n");
+    expect(second.status).toBe("accepted");
+
+    // A catches up to the hub, and both clients agree with it.
+    const hubHash = core.get("readme.md")?.blobHash ?? null;
+    a.lastKnown.set("readme.md", hubHash);
+    expect(core.get("readme.md")?.version).toBe(2);
+    expect(a.lastKnown.get("readme.md")).toBe(hubHash);
+    expect(b.lastKnown.get("readme.md")).toBe(hubHash);
+    // The hub's current version is exactly B's edit, and both clients agree.
+    expect(hubHash).toBe(await sha256Hex("# hello from b\n"));
   });
 
   it("converges when both edit disjoint sections of the same file", async () => {

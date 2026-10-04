@@ -31,31 +31,6 @@ function agent(opts: {
 const green: SandboxVerifier["verify"] = async () => ({ green: true });
 
 describe("MergeAgent", () => {
-  it("accepts a model merge that passes tests", async () => {
-    const a = agent({
-      resolve: async () => ({ content: "a\nMERGED\nc\n", confidence: 0.9 }),
-      verify: green,
-    });
-    const out = await a.resolve(input);
-    expect(out.status).toBe("merged");
-    if (out.status === "merged") {
-      expect(out.content).toBe("a\nMERGED\nc\n");
-      expect(out.verified).toBe(true);
-    }
-  });
-
-  it("keeps both when the model abstains", async () => {
-    const a = agent({ resolve: async () => ({ content: null }), verify: green });
-    const out = await a.resolve(input);
-    expect(out.status).toBe("kept-both");
-    if (out.status === "kept-both") {
-      expect(out.reason).toContain("abstained");
-      expect(out.conflictMarkers).toContain("<<<<<<< ours");
-      expect(out.conflictMarkers).toContain("OURS");
-      expect(out.conflictMarkers).toContain("THEIRS");
-    }
-  });
-
   it("keeps both when confidence is below the threshold", async () => {
     const a = agent({
       resolve: async () => ({ content: "a\nX\nc\n", confidence: 0.2 }),
@@ -65,16 +40,6 @@ describe("MergeAgent", () => {
     const out = await a.resolve(input);
     expect(out.status).toBe("kept-both");
     if (out.status === "kept-both") expect(out.reason).toContain("confidence");
-  });
-
-  it("keeps both when tests fail", async () => {
-    const a = agent({
-      resolve: async () => ({ content: "a\nBROKEN\nc\n", confidence: 0.9 }),
-      verify: async () => ({ green: false, output: "3 failing tests" }),
-    });
-    const out = await a.resolve(input);
-    expect(out.status).toBe("kept-both");
-    if (out.status === "kept-both") expect(out.reason).toContain("tests failed");
   });
 
   it("keeps both when the model throws", async () => {
@@ -116,6 +81,17 @@ describe("MergeAgent", () => {
     });
     await a.resolve(input);
     expect(seen).toBe("bun test");
+  });
+});
+
+describe("defaultConflictMarkers", () => {
+  it("renders git-style markers carrying both sides", () => {
+    const markers = defaultConflictMarkers(input);
+    expect(markers).toContain("<<<<<<< ours");
+    expect(markers).toContain("OURS");
+    expect(markers).toContain("=======");
+    expect(markers).toContain("THEIRS");
+    expect(markers).toContain(">>>>>>> theirs");
   });
 });
 
