@@ -42,6 +42,22 @@ export default {
       return Response.json(result);
     }
 
+    // Content upload (small files). In production this becomes an R2 presigned
+    // PUT (ADR-020); this direct endpoint keeps the client simple for now.
+    if (url.pathname === "/blobs" && request.method === "PUT") {
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      const hash = await sha256HexEdge(bytes);
+      await env.BLOBS.put(hash, bytes);
+      return Response.json({ hash });
+    }
+
+    if (url.pathname.startsWith("/blobs/") && request.method === "GET") {
+      const hash = url.pathname.slice("/blobs/".length);
+      const obj = await env.BLOBS.get(hash);
+      if (!obj) return new Response("not found", { status: 404 });
+      return new Response(await obj.arrayBuffer());
+    }
+
     // ADR-020: mint a presigned R2 PUT or GET URL for direct client transfer.
     // Two implementation options to settle in the presign spike:
     //   1. R2 S3 API with account access keys (aws4fetch / aws-sdk getSignedUrl).
@@ -56,6 +72,13 @@ export default {
     return Response.json({ error: "not_found" }, { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
+
+async function sha256HexEdge(bytes: Uint8Array): Promise<string> {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await crypto.subtle.digest("SHA-256", copy);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 // Re-export the Hub so the Durable Object class is available to the Worker.
 export { Hub } from "@hyphae/hub";

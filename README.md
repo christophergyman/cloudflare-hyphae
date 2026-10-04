@@ -103,13 +103,13 @@ The Hub is the conductor, not the orchestra. It is deliberately thin: it decides
 
 ## Status
 
-- **Phase:** Phase 4 in progress. The Hub, the Artifacts connection, and checkpoints are built.
-- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`), the edge Worker, spike 1, the Hub, and now the Artifacts `RepoStore` adapter plus the checkpoint scheduler. 83 tests total.
-- **Hub (Phase 2):** `HubCore` is the framework-agnostic sync authority (manifest, collision detection, git 3-way merge, conflicts, idempotency), fully unit-tested, including two-client convergence. `Hub` is the Agents SDK `Agent` shell speaking the protocol over WebSockets.
-- **Artifacts + checkpoints (Phase 4):** `ArtifactsRepoStore` commits the Hub's manifest to an Artifacts repo with `isomorphic-git` over smart HTTP, proven end to end against a real git server (commit, fast-forward push, clone-back). `CheckpointScheduler` decides when to commit (quiet ~30s, ceiling ~5min, manual) and the Hub commits on a Durable Object alarm. `POST /repos/:name/commit` forces one.
-- **Spike 1 (Artifacts write path):** proven. See `spikes/artifacts-push/README.md`.
-- **Not yet verified:** the Agents SDK WebSocket path and hibernation, R2, and the live Artifacts binding need a Workers Paid account. The Artifacts adapter's git path is verified locally against a real git server; the binding wiring is built but unrun.
-- **Next:** the client watcher (Phase 3), then the verified merge agent (Phase 5).
+- **Phase:** Phases 3 and 5 built. The full demo path now exists end to end in code.
+- **Done:** contracts (`core`, `protocol`, `repostore`, `merge`), the Hub (`HubCore` + Agents SDK `Agent`), the Artifacts adapter and checkpoints, the **client watcher**, the **verified merge agent**, and the **CLI**. 121 tests total.
+- **Client watcher (Phase 3):** `@hyphae/client` debounces events, detects real changes by hash, suppresses its own writes (echo), applies remote changes atomically, jails every path, and queues changes offline. Two-client convergence is unit-tested.
+- **Verified merge agent (Phase 5):** `@hyphae/merge-agent` asks a model for a merge, verifies it by running the project's tests, and accepts only green results, otherwise keeping both sides. The merge Workflow wires it to AI Gateway and a Sandbox; test-command detection reads package.json.
+- **CLI (ADR-013):** `hyphae up <folder>`, `hyphae checkpoint`, `hyphae status`.
+- **Not yet verified:** the Agents SDK WebSocket path, hibernation, R2, AI Gateway, and Containers need a Workers Paid account. Everything logical is tested locally; the Cloudflare bindings are wired but unrun.
+- **Next:** run it live on Cloudflare (deploy, smoke test), then the live view and MCP surface.
 - Cloudflare Artifacts is in open beta and available on the Workers Paid plan.
 
 ---

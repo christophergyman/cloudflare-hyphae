@@ -1,0 +1,12 @@
+{
+  "name": "@hyphae/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "hyphae": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hyphae/client": "workspace:*"
+  }
+}

@@ -17,7 +17,7 @@ import type { RepoStore } from "@hyphae/repostore";
 import { Agent } from "agents";
 import { CheckpointScheduler } from "./checkpoint.ts";
 import { runCheckpoint } from "./checkpoint-runner.ts";
-import { type BlobReader, HubCore, type HubCoreOptions } from "./core.ts";
+import { type ApplyResult, type BlobReader, HubCore, type HubCoreOptions } from "./core.ts";
 
 export interface HubEnv {
   /** Content-addressed blob store (ADR-004). */
@@ -27,6 +27,25 @@ export interface HubEnv {
    * Artifacts wired up; checkpoints are simply skipped when absent.
    */
   REPO_STORE?: RepoStore;
+  /**
+   * Runs a conflict job (the verified merge Workflow, ADR-014). Optional: when
+   * absent, conflicts are simply surfaced and resolved by a human.
+   */
+  MERGE?: MergeRunner;
+}
+
+/**
+ * Runs a conflict through the merging agent and returns the outcome. In
+ * production this is a Workflow; for tests it can be a direct call.
+ */
+export interface MergeRunner {
+  run(job: {
+    repoId: string;
+    path: string;
+    base: string;
+    ours: string;
+    theirs: string;
+  }): Promise<{ status: "merged" | "kept-both"; content?: string; reason?: string }>;
 }
 
 /** Minimal R2 surface the Hub needs (keeps this free of binding types). */
@@ -210,7 +229,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
       return;
     }
 
-    // Conflict: surface it (ADR-005). The merging agent will resolve it later.
+    // Conflict: surface it, then try the verified merging agent (ADR-005, ADR-014).
     connection.send(
       JSON.stringify({
         type: "conflict",
@@ -219,6 +238,55 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
       }),
     );
     this.broadcast(JSON.stringify({ type: "conflict", changeId: change.id, path: change.path }));
+
+    await this.tryResolveConflict(change, result);
+  }
+
+  /**
+   * Ask the merging agent to resolve a conflict. On a verified merge, accept
+   * and broadcast it. On keep-both (or no agent configured), leave the conflict
+   * surfaced; nothing is ever discarded.
+   */
+  private async tryResolveConflict(change: Change, result: ApplyResult): Promise<void> {
+    if (!this.env.MERGE || !result.conflict) return;
+
+    const read = this.blobReader();
+    const baseBytes = result.conflict.baseHash ? await read(result.conflict.baseHash) : null;
+    const oursBytes = result.conflict.oursHash ? await read(result.conflict.oursHash) : null;
+    const theirsBytes = result.conflict.theirsHash ? await read(result.conflict.theirsHash) : null;
+    if (oursBytes === null || theirsBytes === null) return;
+
+    const decode = (b: Uint8Array | null) => (b ? new TextDecoder().decode(b) : "");
+
+    const outcome = await this.env.MERGE.run({
+      repoId: this.ctx.id.name ?? "repo",
+      path: change.path,
+      base: decode(baseBytes),
+      ours: decode(oursBytes),
+      theirs: decode(theirsBytes),
+    });
+
+    if (outcome.status !== "merged" || outcome.content === undefined) {
+      // Keep both: the conflict stays surfaced for a human. Nothing is lost.
+      return;
+    }
+
+    const bytes = new TextEncoder().encode(outcome.content);
+    const hash = await sha256HexBytes(bytes);
+    await this.env.BLOBS?.put(hash, bytes);
+
+    const core = this.ensureCore();
+    const entry = core.applyResolution(change.path, hash, "merging-agent", Date.now());
+    await this.persistManifest();
+    this.broadcast(
+      JSON.stringify({
+        type: "resolved",
+        changeId: change.id,
+        path: change.path,
+        newHash: entry?.blobHash ?? hash,
+      }),
+    );
+    this.noteChangeForCheckpoint();
   }
 
   /**

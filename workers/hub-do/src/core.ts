@@ -176,8 +176,13 @@ export class HubCore {
   }
 
   /** Record a resolved conflict (after the merging agent or a keep-both). */
-  applyResolution(newHash: string | null, actorId: string, ts: number): ManifestEntry | undefined {
-    return this.accept({ actorId, ts } as Change, newHash);
+  applyResolution(
+    path: string,
+    newHash: string | null,
+    actorId: string,
+    ts: number,
+  ): ManifestEntry | undefined {
+    return this.accept({ path, actorId, ts } as Change, newHash);
   }
 
   private remember(id: string, result: ApplyResult): void {

@@ -12,6 +12,24 @@
         "wrangler": "^4.147.0",
       },
     },
+    "apps/cli": {
+      "name": "@hyphae/cli",
+      "version": "0.0.0",
+      "bin": {
+        "hyphae": "./src/index.ts",
+      },
+      "dependencies": {
+        "@hyphae/client": "workspace:*",
+      },
+    },
+    "apps/client": {
+      "name": "@hyphae/client",
+      "version": "0.0.0",
+      "dependencies": {
+        "@hyphae/core": "workspace:*",
+        "@hyphae/protocol": "workspace:*",
+      },
+    },
     "packages/core": {
       "name": "@hyphae/core",
       "version": "0.0.0",
@@ -21,6 +39,14 @@
       "version": "0.0.0",
       "dependencies": {
         "@hyphae/core": "workspace:*",
+      },
+    },
+    "packages/merge-agent": {
+      "name": "@hyphae/merge-agent",
+      "version": "0.0.0",
+      "dependencies": {
+        "@hyphae/core": "workspace:*",
+        "@hyphae/merge": "workspace:*",
       },
     },
     "packages/protocol": {
@@ -66,9 +92,18 @@
       "dependencies": {
         "@hyphae/core": "workspace:*",
         "@hyphae/merge": "workspace:*",
+        "@hyphae/merge-agent": "workspace:*",
         "@hyphae/protocol": "workspace:*",
         "@hyphae/repostore": "workspace:*",
         "agents": "^0.26.0",
+      },
+    },
+    "workers/merge-workflow": {
+      "name": "@hyphae/merge-workflow",
+      "version": "0.0.0",
+      "dependencies": {
+        "@hyphae/core": "workspace:*",
+        "@hyphae/merge-agent": "workspace:*",
       },
     },
   },
@@ -217,6 +252,10 @@
 
     "@hono/node-server": ["@hono/node-server@2.1.3", "", { "peerDependencies": { "hono": "^4" } }, "sha512-TA//nWMqPhbfdfneACk6t5a9eqbS9lABEPyKn0/xZTah3H3U2XaVg85rJFl0/Fyit0I552YDHgXGVSf3GwqbUw=="],
 
+    "@hyphae/cli": ["@hyphae/cli@workspace:apps/cli"],
+
+    "@hyphae/client": ["@hyphae/client@workspace:apps/client"],
+
     "@hyphae/core": ["@hyphae/core@workspace:packages/core"],
 
     "@hyphae/edge": ["@hyphae/edge@workspace:workers/edge"],
@@ -224,6 +263,10 @@
     "@hyphae/hub": ["@hyphae/hub@workspace:workers/hub-do"],
 
     "@hyphae/merge": ["@hyphae/merge@workspace:packages/merge"],
+
+    "@hyphae/merge-agent": ["@hyphae/merge-agent@workspace:packages/merge-agent"],
+
+    "@hyphae/merge-workflow": ["@hyphae/merge-workflow@workspace:workers/merge-workflow"],
 
     "@hyphae/protocol": ["@hyphae/protocol@workspace:packages/protocol"],
 

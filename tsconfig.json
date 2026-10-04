@@ -5,8 +5,10 @@
       "@hyphae/core": ["./packages/core/src/index.ts"],
       "@hyphae/protocol": ["./packages/protocol/src/index.ts"],
       "@hyphae/repostore": ["./packages/repostore/src/index.ts"],
-      "@hyphae/merge": ["./packages/merge/src/index.ts"]
+      "@hyphae/merge": ["./packages/merge/src/index.ts"],
+      "@hyphae/merge-agent": ["./packages/merge-agent/src/index.ts"],
+      "@hyphae/client": ["./apps/client/src/index.ts"]
     }
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts"]
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "apps/*/src/**/*.ts"]
 }

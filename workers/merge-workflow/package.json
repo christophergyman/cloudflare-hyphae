@@ -1,0 +1,11 @@
+{
+  "name": "@hyphae/merge-workflow",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@hyphae/core": "workspace:*",
+    "@hyphae/merge-agent": "workspace:*"
+  }
+}

@@ -35,11 +35,12 @@ Each checkpoint answers three questions:
 
 ## Build status
 
-- **Phase 4 in progress.** The Hub, the Artifacts connection, and checkpoints are built.
-- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`), the edge Worker, spike 1, the Hub, and the Artifacts `RepoStore` adapter plus the checkpoint scheduler. 83 tests total.
-- **Artifacts + checkpoints (Phase 4):** `ArtifactsRepoStore` commits the Hub's manifest to Artifacts with `isomorphic-git` over smart HTTP, proven end to end against a real git server. `CheckpointScheduler` decides when to commit (quiet ~30s, ceiling ~5min, manual); the Hub commits on a Durable Object alarm, and `POST /repos/:name/commit` forces one.
-- **Not yet verified:** the Agents SDK WebSocket path and hibernation, R2, and the live Artifacts binding need a Workers Paid account. The git path is verified locally against a real git server; the binding wiring is built but unrun.
-- **Next:** the client watcher (Phase 3), then the verified merge agent (Phase 5).
+- **Phases 3 and 5 built.** The full demo path exists end to end in code; 121 tests pass.
+- **Done:** contracts (`core`, `protocol`, `repostore`, `merge`), the Hub, the Artifacts adapter and checkpoints, the client watcher, the verified merge agent, and the CLI.
+- **Client watcher:** debounce, hash-based change detection, echo suppression, atomic apply, path jail, offline queue. Two-client convergence is unit-tested.
+- **Verified merge agent:** model merge verified by running tests; green-only accept, otherwise keep both. Wired to AI Gateway and a Sandbox in the merge Workflow.
+- **Not yet verified:** the Agents SDK WebSocket path, hibernation, R2, AI Gateway, and Containers need a Workers Paid account. The logic is tested locally; the Cloudflare bindings are wired but unrun.
+- **Next:** deploy and smoke-test live on Cloudflare, then the live view and MCP surface.
 
 ---
 

@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p workers/hub-do/tsconfig.json && tsc --noEmit -p workers/edge/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/client/tsconfig.json && tsc --noEmit -p apps/cli/tsconfig.json && tsc --noEmit -p workers/hub-do/tsconfig.json && tsc --noEmit -p workers/edge/tsconfig.json && tsc --noEmit -p workers/merge-workflow/tsconfig.json",
     "check": "bun run typecheck && bun test",
     "lint": "biome check .",
     "format": "biome format --write .",

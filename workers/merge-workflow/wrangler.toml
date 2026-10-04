@@ -1,0 +1,18 @@
+name = "hyphae-merge-workflow"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Model calls go through AI Gateway (ADR-021). Route to Workers AI or an
+# external provider by configuring the gateway, then point AI here.
+[ai]
+binding = "AI"
+
+# Isolated container that runs the project's build and tests (ADR-014).
+# The Container/Sandbox class is bound here; see infra/container/Dockerfile.
+# Replace with your container application binding when deploying.
+# [[containers]]
+# class_name = "Sandbox"
+
+[vars]
+MODEL = "@cf/meta/llama-3.3-70b-instruct"
