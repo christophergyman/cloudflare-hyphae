@@ -35,12 +35,11 @@ Each checkpoint answers three questions:
 
 ## Build status
 
-- **Phase 2 in progress.** The Hub is built and unit-tested.
-- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`) with tests, the edge Worker, spike 1, and the Hub.
-- **Hub (Phase 2):** `HubCore` (framework-agnostic sync authority) plus the Agents SDK `Agent` shell. 64 tests total, including two-client convergence and the conflict path.
-- **Spike 1 (Artifacts write path):** isomorphic-git commit and push over smart HTTP proven locally, including an incremental commit and clone-back. Only the Artifacts host and token auth remain, and they need a Workers Paid account. See `spikes/artifacts-push/README.md`.
-- **Not yet verified:** the Agents SDK WebSocket path and hibernation, R2, and the Artifacts binding need a live Cloudflare account. The Hub logic is verified locally; the transport shell is built but unrun.
-- **Next:** the client watcher (Phase 3), then Checkpoint 0's remaining spikes and Checkpoint 2.
+- **Phase 4 in progress.** The Hub, the Artifacts connection, and checkpoints are built.
+- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`), the edge Worker, spike 1, the Hub, and the Artifacts `RepoStore` adapter plus the checkpoint scheduler. 83 tests total.
+- **Artifacts + checkpoints (Phase 4):** `ArtifactsRepoStore` commits the Hub's manifest to Artifacts with `isomorphic-git` over smart HTTP, proven end to end against a real git server. `CheckpointScheduler` decides when to commit (quiet ~30s, ceiling ~5min, manual); the Hub commits on a Durable Object alarm, and `POST /repos/:name/commit` forces one.
+- **Not yet verified:** the Agents SDK WebSocket path and hibernation, R2, and the live Artifacts binding need a Workers Paid account. The git path is verified locally against a real git server; the binding wiring is built but unrun.
+- **Next:** the client watcher (Phase 3), then the verified merge agent (Phase 5).
 
 ---
 

@@ -8,6 +8,10 @@
   },
   "types": "./src/index.ts",
   "dependencies": {
-    "@hyphae/core": "workspace:*"
+    "@hyphae/core": "workspace:*",
+    "isomorphic-git": "^1.43.0"
+  },
+  "devDependencies": {
+    "node-git-server": "^1.0.0"
   }
 }

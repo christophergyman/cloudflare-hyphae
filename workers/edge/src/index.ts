@@ -31,6 +31,17 @@ export default {
     const agentResponse = await routeAgentRequest(request, env);
     if (agentResponse) return agentResponse;
 
+    // Force a checkpoint (manual trigger, ADR-006). The Hub's public
+    // `checkpoint()` method is called through its Durable Object stub.
+    const commitMatch = url.pathname.match(/^\/repos\/([^/]+)\/commit$/);
+    if (commitMatch && request.method === "POST") {
+      const repoName = commitMatch[1] as string;
+      const id = env.Hub.idFromName(repoName);
+      const stub = env.Hub.get(id) as unknown as { checkpoint(): Promise<{ committed: boolean }> };
+      const result = await stub.checkpoint();
+      return Response.json(result);
+    }
+
     // ADR-020: mint a presigned R2 PUT or GET URL for direct client transfer.
     // Two implementation options to settle in the presign spike:
     //   1. R2 S3 API with account access keys (aws4fetch / aws-sdk getSignedUrl).

@@ -68,6 +68,12 @@ export interface BlobStore {
   has(hash: string): Promise<boolean>;
 }
 
+export type {
+  ArtifactsLike,
+  ArtifactsRepoHandleLike,
+  ArtifactsRepoStoreOptions,
+} from "./artifacts.ts";
+export { ArtifactsRepoStore, MemoryFS } from "./artifacts.ts";
 export { MemoryBlobStore, MemoryRepoStore } from "./memory.ts";
 export type { R2BucketLike } from "./r2.ts";
 export { R2BlobStore } from "./r2.ts";

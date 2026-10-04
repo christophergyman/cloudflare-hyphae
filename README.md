@@ -103,12 +103,13 @@ The Hub is the conductor, not the orchestra. It is deliberately thin: it decides
 
 ## Status
 
-- **Phase:** Phase 2 in progress. The Hub is built and unit-tested.
-- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`) with 53 tests, the edge Worker, spike 1, and the **Hub** (`workers/hub-do`) now at 64 tests total.
-- **Hub (Phase 2):** `HubCore` is the framework-agnostic sync authority (manifest, collision detection, git 3-way merge, conflicts, idempotency) and is fully unit-tested, including two-client convergence. `Hub` is the Agents SDK `Agent` shell that speaks the protocol over WebSockets, persists the manifest in SQLite-backed DO storage, and broadcasts changes.
-- **Spike 1 (Artifacts write path):** isomorphic-git commit and push over smart HTTP proven locally, including an incremental commit and a clone-back. Only the Artifacts host and token auth remain, and they need a Workers Paid account. See `spikes/artifacts-push/README.md`.
-- **Not yet verified:** the Agents SDK WebSocket path and hibernation, R2, and the Artifacts binding need a live Cloudflare account. The Hub logic is verified locally; the transport shell is built but unrun.
-- **Next:** the client watcher (Phase 3), then checkpoints (Phase 4) and the verified merge agent (Phase 5).
+- **Phase:** Phase 4 in progress. The Hub, the Artifacts connection, and checkpoints are built.
+- **Done:** Bun workspaces monorepo, the contract packages (`core`, `protocol`, `repostore`, `merge`), the edge Worker, spike 1, the Hub, and now the Artifacts `RepoStore` adapter plus the checkpoint scheduler. 83 tests total.
+- **Hub (Phase 2):** `HubCore` is the framework-agnostic sync authority (manifest, collision detection, git 3-way merge, conflicts, idempotency), fully unit-tested, including two-client convergence. `Hub` is the Agents SDK `Agent` shell speaking the protocol over WebSockets.
+- **Artifacts + checkpoints (Phase 4):** `ArtifactsRepoStore` commits the Hub's manifest to an Artifacts repo with `isomorphic-git` over smart HTTP, proven end to end against a real git server (commit, fast-forward push, clone-back). `CheckpointScheduler` decides when to commit (quiet ~30s, ceiling ~5min, manual) and the Hub commits on a Durable Object alarm. `POST /repos/:name/commit` forces one.
+- **Spike 1 (Artifacts write path):** proven. See `spikes/artifacts-push/README.md`.
+- **Not yet verified:** the Agents SDK WebSocket path and hibernation, R2, and the live Artifacts binding need a Workers Paid account. The Artifacts adapter's git path is verified locally against a real git server; the binding wiring is built but unrun.
+- **Next:** the client watcher (Phase 3), then the verified merge agent (Phase 5).
 - Cloudflare Artifacts is in open beta and available on the Workers Paid plan.
 
 ---

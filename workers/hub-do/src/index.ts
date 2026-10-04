@@ -13,12 +13,20 @@
 
 import type { Change, ManifestEntry } from "@hyphae/core";
 import { parseClientMessage } from "@hyphae/protocol";
+import type { RepoStore } from "@hyphae/repostore";
 import { Agent } from "agents";
+import { CheckpointScheduler } from "./checkpoint.ts";
+import { runCheckpoint } from "./checkpoint-runner.ts";
 import { type BlobReader, HubCore, type HubCoreOptions } from "./core.ts";
 
 export interface HubEnv {
   /** Content-addressed blob store (ADR-004). */
   BLOBS?: R2BucketLike;
+  /**
+   * Durable history. Left optional so the Hub runs (live-only) without
+   * Artifacts wired up; checkpoints are simply skipped when absent.
+   */
+  REPO_STORE?: RepoStore;
 }
 
 /** Minimal R2 surface the Hub needs (keeps this free of binding types). */
@@ -35,9 +43,12 @@ export interface ConnectionState {
 }
 
 const MANIFEST_KEY = "manifest";
+/** Artifacts repo name used for this Hub's checkpoints. */
+const STORE_REPO = "main";
 
 export class Hub extends Agent<HubEnv, Record<string, never>> {
   private core: HubCore | null = null;
+  private readonly checkpoints = new CheckpointScheduler();
 
   constructor(ctx: ConstructorParameters<typeof Agent>[0], env: HubEnv) {
     super(ctx, env);
@@ -195,6 +206,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
           by: actorId,
         }),
       );
+      this.noteChangeForCheckpoint();
       return;
     }
 
@@ -207,6 +219,58 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
       }),
     );
     this.broadcast(JSON.stringify({ type: "conflict", changeId: change.id, path: change.path }));
+  }
+
+  /**
+   * Mark a change as pending a checkpoint and make sure an alarm is set for the
+   * next due time (ADR-006). Called after every accepted change.
+   */
+  private noteChangeForCheckpoint(): void {
+    this.checkpoints.onChange(Date.now());
+    const next = this.checkpoints.nextCheckAt();
+    if (next !== null) {
+      // Arm the alarm. Setting it again simply moves it; the alarm handler
+      // re-arms if changes keep arriving before the ceiling.
+      void this.ctx.storage.setAlarm(next);
+    }
+  }
+
+  /** Agent alarm hook: commit when the scheduler says a checkpoint is due. */
+  override async alarm(): Promise<void> {
+    await super.alarm();
+    await this.maybeCheckpoint();
+  }
+
+  /** Commit to durable history if the scheduler says it is due. */
+  private async maybeCheckpoint(): Promise<void> {
+    if (!this.env.REPO_STORE) return; // no durable store configured
+    const decision = this.checkpoints.due(Date.now());
+    if (!decision) return;
+
+    const core = this.ensureCore();
+    await runCheckpoint(this.env.REPO_STORE, {
+      repo: STORE_REPO,
+      entries: core.manifestEntries(),
+      readBlob: this.blobReader(),
+      message: `checkpoint (${decision.reason})`,
+    });
+    this.checkpoints.onCommitted();
+  }
+
+  /** Public method: force a checkpoint now (manual trigger, ADR-006). */
+  async checkpoint(): Promise<{ committed: boolean }> {
+    if (!this.env.REPO_STORE) return { committed: false };
+    const forced = this.checkpoints.force();
+    if (!forced) return { committed: false };
+    const core = this.ensureCore();
+    await runCheckpoint(this.env.REPO_STORE, {
+      repo: STORE_REPO,
+      entries: core.manifestEntries(),
+      readBlob: this.blobReader(),
+      message: "checkpoint (manual)",
+    });
+    this.checkpoints.onCommitted();
+    return { committed: true };
   }
 
   private async storeInline(base64: string): Promise<string> {
