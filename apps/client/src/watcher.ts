@@ -59,7 +59,7 @@ export class Watcher {
   }
 
   start(): void {
-    if (this.watcher) return; // already started
+    if (this.watcher) return;
     this.stopped = false;
     this.watcher = watch(this.root, { recursive: true }, (_event, filename) => {
       if (!filename) return;

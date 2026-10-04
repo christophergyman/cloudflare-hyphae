@@ -16,25 +16,16 @@ import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import type { CommitAuthor, CommitHash, RepoRef, RepoStore, TreeFile } from "./index.ts";
 import { MemoryFS } from "./memory-fs.ts";
+import type { ArtifactsToken } from "./token.ts";
+import { DEFAULT_GIT_USERNAME, tokenSecret } from "./token.ts";
+import { fileMatches, replaceTree, stageAll } from "./tree-ops.ts";
+
+export type { ArtifactsToken } from "./token.ts";
 
 /** Minimal structural view of the Artifacts Workers binding. */
 export interface ArtifactsLike {
   create(name: string): Promise<{ name: string; remote: string; token: unknown }>;
   get(name: string): Promise<ArtifactsRepoHandleLike>;
-}
-
-/**
- * The token shape returned by the Artifacts binding's `createToken`.
- *
- * In workerd the binding returns an object (`{ id, plaintext, scope, expiresAt }`),
- * not a bare string. Older/other adapters may return a plain string, so both
- * are accepted and normalized by {@link tokenSecret}.
- */
-export interface ArtifactsToken {
-  id?: string;
-  plaintext: string;
-  scope?: string;
-  expiresAt?: string;
 }
 
 export interface ArtifactsRepoHandleLike {
@@ -67,18 +58,6 @@ export function isMissingRefError(err: unknown): boolean {
 }
 
 /**
- * Normalize an Artifacts token to the bare secret used for git Basic auth.
- *
- * The workerd binding returns an object (`{ plaintext, ... }`); other paths may
- * return a string. The plaintext looks like `art_v2_<secret>?expires=<unix>`,
- * so strip the query before using it as the password.
- */
-function tokenSecret(token: string | ArtifactsToken): string {
-  const plaintext = typeof token === "string" ? token : (token?.plaintext ?? "");
-  return plaintext.split("?expires=")[0] ?? plaintext;
-}
-
-/**
  * RepoStore backed by Cloudflare Artifacts.
  *
  * Each repo is created once via the binding, then commits are pushed with
@@ -103,7 +82,7 @@ export class ArtifactsRepoStore implements RepoStore {
     private readonly artifacts: ArtifactsLike,
     options: ArtifactsRepoStoreOptions = {},
   ) {
-    this.username = options.username ?? "x";
+    this.username = options.username ?? DEFAULT_GIT_USERNAME;
     this.tokenTtl = options.tokenTtlSeconds ?? 3600;
   }
 
@@ -360,81 +339,5 @@ export class ArtifactsRepoStore implements RepoStore {
     void ref;
     void hash;
     // Pushing to `main` already advances the ref on the Artifacts side.
-  }
-}
-
-/** Stage every file under `dir` recursively, and stage deletions. */
-async function stageAll(
-  fs: MemoryFS,
-  dir: string,
-): Promise<{ added: string[]; removed: string[] }> {
-  const added: string[] = [];
-  const desired = new Set<string>();
-
-  async function walk(current: string, prefix: string): Promise<void> {
-    const names = await fs.promises.readdir(current);
-    for (const name of names) {
-      if (name === ".git") continue;
-      const full = `${current}/${name}`;
-      const stat = await fs.promises.lstat(full);
-      if (stat.isDirectory()) {
-        await walk(full, prefix ? `${prefix}/${name}` : name);
-      } else {
-        const relative = prefix ? `${prefix}/${name}` : name;
-        desired.add(relative);
-        await git.add({ fs, dir, filepath: relative });
-        added.push(relative);
-      }
-    }
-  }
-  await walk(dir, "");
-
-  // Stage removal of tracked files no longer present in the tree.
-  const removed: string[] = [];
-  const tracked = await git.listFiles({ fs, dir });
-  for (const path of tracked) {
-    if (!desired.has(path)) {
-      await git.remove({ fs, dir, filepath: path });
-      removed.push(path);
-    }
-  }
-  return { added, removed };
-}
-
-/** True when the file at `path` already has exactly the bytes of `content`. */
-async function fileMatches(fs: MemoryFS, path: string, content: Uint8Array): Promise<boolean> {
-  try {
-    const existing = await fs.promises.readFile(path);
-    const bytes = typeof existing === "string" ? new TextEncoder().encode(existing) : existing;
-    if (bytes.byteLength !== content.byteLength) return false;
-    for (let i = 0; i < bytes.byteLength; i++) {
-      if (bytes[i] !== content[i]) return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Replace the working tree under `dir` with exactly `files`. */
-async function replaceTree(fs: MemoryFS, dir: string, files: TreeFile[]): Promise<void> {
-  // Remove everything currently in the tree (except .git).
-  async function clear(current: string): Promise<void> {
-    const names = await fs.promises.readdir(current);
-    for (const name of names) {
-      if (name === ".git") continue;
-      const full = `${current}/${name}`;
-      const stat = await fs.promises.lstat(full);
-      if (stat.isDirectory()) {
-        await clear(full);
-        await fs.promises.rmdir(full);
-      } else {
-        await fs.promises.unlink(full);
-      }
-    }
-  }
-  await clear(dir);
-  for (const file of files) {
-    await fs.promises.writeFile(`${dir}/${file.path}`, file.content);
   }
 }

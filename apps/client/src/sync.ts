@@ -215,7 +215,6 @@ export class SyncEngine {
     await applyRemoteChange(this.fs, this.root, path, bytes);
     this.synced.set(path, newHash);
     this.appliedVersion.set(path, version);
-    // Our own write: ignore the echo it will trigger.
     this.detector.noteOwnWrite(path, newHash);
   }
 

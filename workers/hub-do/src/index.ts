@@ -12,25 +12,23 @@
  */
 
 import type { Change, ManifestEntry } from "@hyphae/core";
-import { sha256Hex } from "@hyphae/core";
 import type { AiBindingLike } from "@hyphae/merge-agent";
 import { createMergeRunner } from "@hyphae/merge-agent";
 import type { HistoryEvent, HubRpc } from "@hyphae/protocol";
 import type { ArtifactsLike, R2BucketLike, RepoStore } from "@hyphae/repostore";
 import { ArtifactsRepoStore } from "@hyphae/repostore";
 import { Agent } from "agents";
+import { blobReader, storeInline } from "./blobs.ts";
 import { CheckpointScheduler } from "./checkpoint.ts";
 import { runCheckpoint } from "./checkpoint-runner.ts";
-import {
-  type ApplyResult,
-  type BlobReader,
-  HubCore,
-  type HubCoreOptions,
-  loadManifestEntries,
-  persistManifestEntry,
-} from "./core.ts";
-import { base64ToBytes, isAlreadyExistsError, parseClientMessageSafe } from "./helpers.ts";
+import { HubCore, type HubCoreOptions, loadManifestEntries, persistManifestEntry } from "./core.ts";
+import { isAlreadyExistsError, parseClientMessageSafe } from "./helpers.ts";
 import { HistoryFeed } from "./history.ts";
+import type { MergeRunner } from "./merge-coordinator.ts";
+import { tryResolveConflict } from "./merge-coordinator.ts";
+import { presenceMessage } from "./presence.ts";
+
+export type { MergeRunner } from "./merge-coordinator.ts";
 
 export interface HubEnv {
   /** Content-addressed blob store (ADR-004). */
@@ -65,20 +63,8 @@ export interface HubEnv {
 }
 
 /**
- * Runs a conflict through the merging agent and returns the outcome. In
- * production this is a Workflow; for tests it can be a direct call.
+ * Per-connection state, persisted with the hibernating WebSocket.
  */
-export interface MergeRunner {
-  run(job: { repoId: string; path: string; base: string; ours: string; theirs: string }): Promise<{
-    status: "merged" | "kept-both";
-    content?: string;
-    reason?: string;
-    /** True when the result was verified by running tests (ADR-014). */
-    verified?: boolean;
-  }>;
-}
-
-/** Per-connection state, persisted with the hibernating WebSocket. */
 export interface ConnectionState {
   actorId: string;
   displayName: string;
@@ -121,7 +107,6 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     if (this.env.ARTIFACTS) {
       if (!this.artifactsStore) {
         this.artifactsStore = new ArtifactsRepoStore(this.env.ARTIFACTS, {
-          username: "x",
           tokenTtlSeconds: 3600,
         });
       }
@@ -197,16 +182,6 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     await persistManifestEntry(this.ctx.storage, path, entry);
   }
 
-  private blobReader(): BlobReader {
-    const bucket = this.env.BLOBS;
-    return async (hash: string) => {
-      if (!bucket) return null;
-      const obj = await bucket.get(hash);
-      if (!obj) return null;
-      return new Uint8Array(await obj.arrayBuffer());
-    };
-  }
-
   /** Send the full manifest to one connection on connect or resync. */
   private sendManifest(connection: { send(msg: string): void }): void {
     const core = this.ensureCore();
@@ -214,16 +189,8 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
   }
 
   private broadcastPresence(): void {
-    const actors = [...this.getConnections<ConnectionState>()].map((c) => {
-      const state = c.state ?? { actorId: "unknown", displayName: "unknown", kind: "human" };
-      return {
-        actorId: state.actorId,
-        displayName: state.displayName,
-        kind: state.kind,
-        observer: state.observer ?? false,
-      };
-    });
-    this.broadcast(JSON.stringify({ type: "presence", actors }));
+    const states = [...this.getConnections<ConnectionState>()].map((c) => c.state);
+    this.broadcast(JSON.stringify(presenceMessage(states)));
   }
 
   override onConnect(
@@ -280,7 +247,6 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
       return;
     }
     if (msg.type === "ack") {
-      // Client acknowledged a change id; nothing more to do here today.
       return;
     }
     if (msg.type === "change") {
@@ -305,7 +271,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     // Inline content: store it as a blob first (small-file path, ADR-020).
     let newHash = msg.newHash ?? null;
     if (msg.contentBase64 !== undefined) {
-      newHash = await this.storeInline(msg.contentBase64);
+      newHash = await storeInline(this.env.BLOBS, msg.contentBase64);
     }
 
     const change: Change = {
@@ -318,7 +284,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
       ts: Date.now(),
     };
 
-    const result = await core.apply(change, this.blobReader());
+    const result = await core.apply(change, blobReader(this.env.BLOBS));
 
     if (result.status === "duplicate") {
       connection.send(JSON.stringify({ type: "ack", changeId: change.id }));
@@ -326,7 +292,6 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     }
 
     if (result.status === "accepted") {
-      // Persist merged content if the 3-way merge produced it.
       if (result.mergedContent) {
         const hash = result.entry?.blobHash;
         if (hash) await this.env.BLOBS?.put(hash, result.mergedContent);
@@ -369,96 +334,21 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     );
     this.broadcast(JSON.stringify({ type: "conflict", changeId: change.id, path: change.path }));
 
-    await this.tryResolveConflict(change, result);
-  }
-
-  /**
-   * Ask the merging agent to resolve a conflict. On a verified merge, accept
-   * and broadcast it. On keep-both (or no agent configured), leave the conflict
-   * surfaced; nothing is ever discarded.
-   */
-  private async tryResolveConflict(change: Change, result: ApplyResult): Promise<void> {
-    if (!result.conflict) return;
-    const merge = this.mergeRunner();
-    if (!merge) return;
-
-    const read = this.blobReader();
-    const baseBytes = result.conflict.baseHash ? await read(result.conflict.baseHash) : null;
-    const oursBytes = result.conflict.oursHash ? await read(result.conflict.oursHash) : null;
-    const theirsBytes = result.conflict.theirsHash ? await read(result.conflict.theirsHash) : null;
-    if (oursBytes === null || theirsBytes === null) return;
-
-    const decode = (b: Uint8Array | null) => (b ? new TextDecoder().decode(b) : "");
-
-    let outcome: {
-      status: "merged" | "kept-both";
-      content?: string;
-      reason?: string;
-      verified?: boolean;
-    };
-    try {
-      outcome = await merge.run({
+    await tryResolveConflict(
+      {
         repoId: this.ctx.id.name ?? "repo",
-        path: change.path,
-        base: decode(baseBytes),
-        ours: decode(oursBytes),
-        theirs: decode(theirsBytes),
-      });
-    } catch (err) {
-      // Surface the failure instead of swallowing it, so the live view shows why.
-      await this.history.record({
-        kind: "conflict",
-        path: change.path,
-        by: "merging-agent",
-        detail: `merge failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
-        at: Date.now(),
-      });
-      return;
-    }
-
-    if (outcome.status !== "merged" || outcome.content === undefined) {
-      // Keep both: the conflict stays surfaced for a human. Nothing is lost.
-      await this.history.record({
-        kind: "conflict",
-        path: change.path,
-        by: "merging-agent",
-        detail: `kept both: ${outcome.reason ?? "unresolved"}`.slice(0, 200),
-        at: Date.now(),
-      });
-      return;
-    }
-
-    const bytes = new TextEncoder().encode(outcome.content);
-    const hash = await sha256Hex(bytes);
-    await this.env.BLOBS?.put(hash, bytes);
-
-    const core = this.ensureCore();
-    const entry = core.applyResolution(
-      change.path,
-      hash,
-      result.conflict.theirsHash,
-      "merging-agent",
-      Date.now(),
+        core,
+        readBlob: blobReader(this.env.BLOBS),
+        blobs: this.env.BLOBS,
+        mergeRunner: () => this.mergeRunner(),
+        history: this.history,
+        persistManifest: (path, entry) => this.persistManifest(path, entry),
+        broadcast: (msg) => this.broadcast(msg),
+        noteChangeForCheckpoint: () => this.noteChangeForCheckpoint(),
+      },
+      change,
+      result,
     );
-    // If the resolution was stale (the file moved on), do not broadcast it.
-    if (entry?.blobHash !== hash) return;
-    await this.persistManifest(change.path, entry);
-    await this.history.record({
-      kind: "resolved",
-      path: change.path,
-      by: "merging-agent",
-      detail: outcome.verified ? "resolved and verified" : "resolved by agent",
-      at: Date.now(),
-    });
-    this.broadcast(
-      JSON.stringify({
-        type: "resolved",
-        changeId: change.id,
-        path: change.path,
-        newHash: entry?.blobHash ?? hash,
-      }),
-    );
-    await this.noteChangeForCheckpoint();
   }
 
   /**
@@ -522,7 +412,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     const result = await runCheckpoint(store, {
       repo: this.storeRepo,
       entries: core.manifestEntries(),
-      readBlob: this.blobReader(),
+      readBlob: blobReader(this.env.BLOBS),
       message,
     });
     if (result.missing.length === 0) this.checkpoints.onCommitted(generation);
@@ -537,12 +427,5 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
   /** Public method: recent activity feed, for read clients (the live view). */
   recentEvents(): { events: HistoryEvent[] } {
     return { events: this.history.snapshot() };
-  }
-
-  private async storeInline(base64: string): Promise<string> {
-    const bytes = base64ToBytes(base64);
-    const hash = await sha256Hex(bytes);
-    await this.env.BLOBS?.put(hash, bytes);
-    return hash;
   }
 }

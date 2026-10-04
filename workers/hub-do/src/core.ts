@@ -89,7 +89,6 @@ export class HubCore {
     const current = this.manifest.get(change.path);
     const currentHash = current?.blobHash ?? null;
 
-    // No collision: base matches current, accept directly.
     if (change.baseHash === currentHash) {
       const entry = this.accept(change.path, change.actorId, change.ts, change.newHash);
       return { status: "accepted", entry };
