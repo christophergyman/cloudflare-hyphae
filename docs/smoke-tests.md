@@ -2,12 +2,12 @@
 
 Live and local results for Hyphae. Run these to verify the system end to end.
 
-Deployed Worker: `https://hyphae-edge.christophergayiuman.workers.dev`
+Deployed Worker: `https://<your-worker>.workers.dev`
 Repo: `cloudflare-hyphae`
 
 ## Live on Cloudflare (verified)
 
-These exercise the real bindings: Agents SDK WebSocket, Durable Objects, R2, and the live 3-way merge.
+These exercise the real bindings: Agents SDK WebSocket, Durable Objects, R2, Artifacts, and the live 3-way merge.
 
 | Test | Result |
 |---|---|
@@ -17,13 +17,13 @@ These exercise the real bindings: Agents SDK WebSocket, Durable Objects, R2, and
 | A sends a change, B receives `changed` | live broadcast works |
 | Concurrent **disjoint** edits to one file | Hub clean-merges, correct content (`ALPHA\nbeta\nGAMMA\n`) |
 | Concurrent **same-line** edits | Hub surfaces `conflict` |
-| `POST /repos/:name/commit` | 200, `{"committed":false}` (no durable store bound yet) |
+| `POST /repos/:name/commit` | 200, `{"committed":true}` (Artifacts bound as the durable store) |
 | Durable Object execution in `wrangler tail` | healthy, ~8ms CPU, no errors |
 
 Reproduce the live checks:
 
 ```
-export URL=https://hyphae-edge.christophergayiuman.workers.dev
+export URL=https://<your-worker>.workers.dev
 curl -s $URL/health
 HASH=$(curl -s -X PUT $URL/blobs --data-binary 'hello' | grep -oE '"hash":"[a-f0-9]+"' | cut -d'"' -f4)
 curl -s $URL/blobs/$HASH
@@ -55,9 +55,8 @@ and a regression test covers it.
 
 ## Not yet exercised live
 
-- **Artifacts binding** as the Hub's `REPO_STORE` (the adapter is verified
-  against a real git server locally; the live binding needs wiring in the
-  deployed Worker).
-- **AI Gateway + Contrast** merge (needs the model and container bindings
-  configured on the deployed Worker).
-- **Checkpoints** on the live Hub (same: needs `REPO_STORE` bound).
+- **AI merge with a sandbox.** The AI Gateway model path runs, but no
+  sandbox/container binding is configured, so the merge runner refuses to
+  accept unverified output and always keeps both sides (ADR-014).
+- **R2 presigned URLs.** `/blobs/presign` returns 501; the current transport is
+  the Worker-proxied `/blobs` endpoint with a 1.5 MB cap (ADR-020).

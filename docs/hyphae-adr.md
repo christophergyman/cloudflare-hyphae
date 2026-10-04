@@ -282,11 +282,11 @@ updateRef(name, ref, hash) -> void
 
 ### ADR-020: Blob transport uses R2 presigned URLs
 
-- **Status:** Accepted
+- **Status:** Accepted (transport deferred)
 - **Context:** File content can reach tens of megabytes. Pushing bytes through the Hub WebSocket strains the Durable Object memory and CPU budget.
 - **Decision:** Clients transfer content directly to and from **R2 using presigned PUT/GET URLs** minted by the edge Worker. The Hub WebSocket carries control messages and hashes only (`change { path, baseHash, newHash }`), with small content inline under a threshold (about 256 KB).
 - **Rationale:** Protects the DO budget, scales with file size, and keeps the Hub a control plane rather than a data pipe.
-- **Consequences:** Needs R2 S3 credentials or the Workers presign path at the edge. Content stays content-addressed by `sha256`. Replaces the ADR-012 assumption that full content rides the WebSocket.
+- **Consequences:** Needs R2 S3 credentials or the Workers presign path at the edge. Content stays content-addressed by `sha256`. Replaces the ADR-012 assumption that full content rides the WebSocket. **Deferred:** `/blobs/presign` currently returns 501; the live transport is a Worker-proxied `/blobs` PUT/GET with a 1.5 MB cap.
 
 ### ADR-021: Model access goes through AI Gateway with Secrets Store
 
@@ -297,10 +297,10 @@ updateRef(name, ref, hash) -> void
 
 ### ADR-022: Instrument with Workers Analytics Engine
 
-- **Status:** Accepted
+- **Status:** Accepted (seam in place, binding not wired)
 - **Decision:** Emit metrics to **Workers Analytics Engine** from the start: save-to-visible latency, merges attempted/verified/fallen-back, and per-actor activity. Query with SQL.
 - **Rationale:** The one metric that matters and the moat metric come free, and the Phase 9 merge dataset has a home.
-- **Consequences:** A thin metrics module in `packages/core`, used by the Hub and the merge Workflow. Post-MVP, R2 SQL / Pipelines / R2 Data Catalog and Vectorize extend this into the moat analytics and retrieval layer.
+- **Consequences:** A thin metrics module in `packages/core`, used by the Hub and the merge Workflow. No Analytics Engine binding is configured: `packages/core` provides `noopMetrics` (the Hub's current default) and an `analyticsEngineMetrics` adapter ready for a binding. Post-MVP, R2 SQL / Pipelines / R2 Data Catalog and Vectorize extend this into the moat analytics and retrieval layer.
 
 ### ADR-023: Abuse resistance is reopened and uses native primitives
 
@@ -361,11 +361,19 @@ hub -> client:
 
 ### 4.2 REST (supporting)
 
-- `POST /repos`, `GET /repos/:name`
+Implemented in `workers/edge/src/index.ts`:
+
+- `GET /health`
+- `/agents/*` (Agents SDK routing to the per-repo Hub, including the WebSocket upgrade)
 - `GET /repos/:name/manifest`
-- `POST /repos/:name/blobs/presign` (mint a presigned R2 PUT or GET)
-- `GET /blobs/:hash`
+- `GET /repos/:name/history`
 - `POST /repos/:name/commit` (force a checkpoint)
+- `PUT /blobs`, `GET /blobs/:hash` (Worker-proxied content transport, 1.5 MB cap)
+- `POST /blobs/presign` returns 501 (deferred, ADR-020)
+
+Planned, not implemented:
+
+- `POST /repos`, `GET /repos/:name`. There is no create-repo HTTP surface: repos are addressed by name and the Hub's Artifacts store creates them on first commit.
 
 ### 4.3 Checkpointing
 
@@ -392,7 +400,7 @@ hub -> client:
   /repostore      TS          RepoStore port + Artifacts adapter
   /protocol       TS          WebSocket and REST schemas (shared, versioned)
 /infra
-  wrangler.toml, R2 bucket, Container/Dockerfile, Workflow + AI Gateway config
+  container/Dockerfile (Workflow and AI Gateway bindings are designed, not wired)
 /docs
   hyphae-prd.md, hyphae-adr.md, archive/
 ```
@@ -407,11 +415,11 @@ hub -> client:
 | Live per-repo authority, sync, WebSockets | **Durable Objects** via the **Agents SDK `Agent`** (ADR-017) |
 | Hub state, scheduling, RPC, MCP surface | **Agents SDK** (`Agent`, `McpAgent`, `createMcpHandler`) |
 | Edge API, auth, routing | **Workers** |
-| Blob content and direct transfer | **R2** with presigned URLs (ADR-020) |
-| Durable merge job (resolve + verify + commit) | **Workflows** |
+| Blob content and direct transfer | **R2** (Worker-proxied `/blobs`; presigned URLs deferred, ADR-020) |
+| Durable merge job (resolve + verify + commit) | **Workflows** (designed, not wired) |
 | Model calls (code-capable) | **AI Gateway** (frontier model, Workers AI fallback, ADR-021) |
 | Provider key storage | **Secrets Store** |
-| Isolated space to resolve and run tests | **Containers** via `ctx.container`, `durable_object` policy, snapshots (ADR-014) |
+| Isolated space to resolve and run tests | **Containers** via `ctx.container`, `durable_object` policy, snapshots (designed, not wired, ADR-014) |
 | Fast path for JS/TS verification, untrusted code | **Dynamic Workers** (Worker Loader) |
 | Lazy repo mount in a container | **ArtifactFS** (experimental) |
 | Metrics and the moat dataset signal | **Workers Analytics Engine** (ADR-022) |

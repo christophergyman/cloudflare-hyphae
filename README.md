@@ -95,7 +95,7 @@ The Hub is the conductor, not the orchestra. It is deliberately thin: it decides
 | Running the fast git 3-way merge | Model calls to **AI Gateway** |
 | Broadcasting changes to clients | Durable git history to **Artifacts** |
 | Presence: who is connected, who touched what | Metrics to **Analytics Engine** |
-| Checkpoint scheduling (quiet, ceiling, manual) | Long file transfers to **R2 presigned URLs** |
+| Checkpoint scheduling (quiet, ceiling, manual) | Long file transfers to **R2 presigned URLs** (deferred; the Worker proxies `/blobs` with a 1.5 MB cap today) |
 
 **The Hub decides; R2, Artifacts, Workflows, and the model do.**
 
@@ -104,11 +104,12 @@ The Hub is the conductor, not the orchestra. It is deliberately thin: it decides
 ## Status
 
 - **Phase:** the full demo path is built and **running live on Cloudflare**.
-- **Live deployment:** `https://hyphae-edge.christophergayiuman.workers.dev` serves the API and the **live view** (open it and enter a repo name).
+- **Live deployment:** `https://<your-worker>.workers.dev` serves the API and the **live view** (open it and enter a repo name).
 - **Proven live:** two clients sync through the Hub over the Agents SDK WebSocket; a concurrent **disjoint** edit clean-merges with correct content; a concurrent **same-line** edit surfaces a conflict; blobs round-trip through R2; the live view shows actors, files, activity, and previews in real time.
 - **Live view (`apps/web`):** a read-only dashboard served as a static asset from the edge Worker. Shows connected actors, current files and versions, a live activity feed (changes, clean merges, conflicts, agent resolutions), and a file preview from R2. The Hub keeps the last 200 events so the feed is populated on open.
 - **Spike 1 (Artifacts write path):** proven locally against a real git server (commit, incremental push, clone-back).
-- **Not yet wired live:** Artifacts as the Hub's durable store, and the AI merge (AI Gateway + container). Both are built and unit-tested; only the live bindings remain.
+- **Live and proven:** Artifacts checkpoints. The edge Worker binds `ARTIFACTS`, the Hub builds its durable store from it, and `POST /repos/:name/commit` returns `{"committed":true}`.
+- **Built, not wired live:** the AI merge. The merge agent is built and unit-tested, but no sandbox/container binding exists, so `mergeRunner()` always keeps both sides.
 - Cloudflare Artifacts is in open beta and available on the Workers Paid plan.
 
 ---
@@ -167,10 +168,10 @@ The rejected v1 design lives at `docs/archive/hyphae-adr-v1-live-ops.md`. It is 
 | Durable versioned storage, git history, clones | **Artifacts** |
 | Live per-repo authority, sync, WebSockets | **Durable Objects** via the **Agents SDK `Agent`** |
 | Edge API, auth, routing | **Workers** |
-| Blob content, direct transfer | **R2** with presigned URLs |
-| Durable merge job (resolve + verify + commit) | **Workflows** |
+| Blob content, direct transfer | **R2** (Worker-proxied `/blobs`; presigned URLs deferred) |
+| Durable merge job (resolve + verify + commit) | **Workflows** (designed, not wired) |
 | Code-capable model calls | **AI Gateway** (frontier model, Workers AI fallback) |
-| Isolated space to resolve and run tests | **Containers** (`ctx.container`) |
+| Isolated space to resolve and run tests | **Containers** (`ctx.container`) (designed, not wired) |
 | Metrics and the moat signal | **Workers Analytics Engine** |
 | Metadata, attribution (later) | **D1** |
 | Agent participation | **MCP server + CLI** |
@@ -179,17 +180,15 @@ Full detail is in `docs/hyphae-adr.md` and `docs/hyphae-stack.md`.
 
 ---
 
-## Planned repository layout
-
-This does not exist yet. It is the target for Phase 0.
+## Repository layout
 
 ```
 /apps
   /cli            Bun + TS    human CLI and the local daemon (watcher + sync + journal)
-  /mcp            TS          MCP server for agents
+  /mcp            TS          MCP server for agents (planned, not built)
   /web            TS          simple live view
 /workers
-  /edge           TS          auth, routing, REST, WebSocket upgrade, blob presign
+  /edge           TS          auth, routing, REST, WebSocket upgrade, blob transport
   /hub-do         TS          the Hub (Agents SDK Agent)
   /merge-workflow TS          Workflow: model merge + container verify + commit
 /packages
@@ -198,7 +197,7 @@ This does not exist yet. It is the target for Phase 0.
   /repostore      TS          RepoStore port + Artifacts adapter
   /protocol       TS          WebSocket and REST schemas (shared, versioned)
 /infra
-  wrangler.toml, R2 bucket, Container/Dockerfile, Workflow + AI Gateway config
+  container/Dockerfile (Workflow and AI Gateway bindings are designed, not wired)
 /docs
   hyphae-prd.md, hyphae-adr.md, hyphae-stack.md, hyphae-plan.md, hyphae-context.md, archive/
 ```
@@ -209,7 +208,7 @@ This does not exist yet. It is the target for Phase 0.
 
 - **Language:** TypeScript everywhere.
 - **Client runtime:** Bun (the CLI plus the local file-watching daemon).
-- **Cloudflare runtime:** Workers and Durable Objects (workerd), with the Hub on the **Agents SDK** and the merge verifier on **Containers** (`ctx.container`).
+- **Cloudflare runtime:** Workers and Durable Objects (workerd), with the Hub on the **Agents SDK**. The merge verifier targets **Containers** (`ctx.container`), which is designed but not wired.
 - **Shared code rule:** shared packages use web-standard APIs only, so they run in both workerd and Bun.
 - **Requirements:** a Workers Paid plan (about $5/mo). Artifacts, Containers, Workflows, and the good Workers AI code models all need it.
 - **Performance escape hatch:** keep the merge/apply logic in `packages/merge` pure and runtime-agnostic, so it could later be compiled to WASM if needed. Do not optimize prematurely.

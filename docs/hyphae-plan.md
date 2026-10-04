@@ -36,11 +36,12 @@ Each checkpoint answers three questions:
 ## Build status
 
 - **The full demo path is built and running live on Cloudflare.**
-- **Live deployment:** `https://hyphae-edge.christophergayiuman.workers.dev` (API plus the live view).
+- **Live deployment:** `https://<your-worker>.workers.dev` (API plus the live view).
 - **Proven live:** two-client sync over the Agents SDK WebSocket, a concurrent disjoint clean-merge with correct content, a same-line conflict, R2 blob round-trips, and the live view updating in real time.
 - **Done:** contracts, the Hub, the Artifacts adapter and checkpoints, the client watcher, the verified merge agent, the CLI, and the live view.
-- **Not yet wired live:** Artifacts as the Hub's durable store, and the AI merge (AI Gateway + container). Both are built and unit-tested; only the live bindings remain.
-- **Next:** wire those two live, then the MCP surface.
+- **Live and proven:** Artifacts checkpoints. The `ARTIFACTS` binding is wired and the Hub builds its durable store from it, so a forced commit returns `{"committed":true}`.
+- **Built, not wired live:** the AI merge. The merge agent is built and unit-tested, but no sandbox/container binding exists, so it always keeps both sides.
+- **Next:** wire the sandbox/container for the AI merge, then the MCP surface.
 
 ---
 
@@ -254,6 +255,8 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 **Goal:** Same-line conflicts get resolved by a model that proves its work by running the tests.
 
 **Why now:** This is the trust layer and the differentiator (ADR-014). The demo is not complete without it.
+
+**Status:** Designed, not wired. The merge agent is built and unit-tested, but no `[[workflows]]` or `[[containers]]` binding exists, so on the deployed Worker it always keeps both sides.
 
 **Deliverables**
 
