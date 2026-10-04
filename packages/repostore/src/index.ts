@@ -74,8 +74,8 @@ export type {
   ArtifactsRepoStoreOptions,
   ArtifactsToken,
 } from "./artifacts.ts";
-export { ArtifactsRepoStore } from "./artifacts.ts";
-export { MemoryFS } from "./memory-fs.ts";
+export { ArtifactsRepoStore, isMissingRefError } from "./artifacts.ts";
 export { MemoryBlobStore, MemoryRepoStore } from "./memory.ts";
+export { MemoryFS } from "./memory-fs.ts";
 export type { R2BucketLike } from "./r2.ts";
 export { R2BlobStore } from "./r2.ts";

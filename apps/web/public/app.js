@@ -67,7 +67,7 @@ function renderActors() {
     li.className = "actor";
     li.innerHTML = `<span class="actor-dot"></span><span>${escapeHtml(
       a.displayName,
-    )}</span><span class="kind">${a.observer ? "view" : a.kind}</span>`;
+    )}</span><span class="kind">${a.observer ? "view" : escapeHtml(a.kind)}</span>`;
     el.actors.appendChild(li);
   }
 }

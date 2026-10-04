@@ -234,6 +234,25 @@ export type PresignRequest = z.infer<typeof presignRequestSchema>;
 export type PresignResponse = z.infer<typeof presignResponseSchema>;
 export type CreateRepoRequest = z.infer<typeof createRepoSchema>;
 export type RepoResponse = z.infer<typeof repoResponseSchema>;
+export type ManifestEntry = z.infer<typeof manifestEntrySchema>;
+
+/**
+ * The Hub's public RPC surface.
+ *
+ * Declared with synchronous-looking return types because that is how the Hub
+ * implements them. The Durable Object stub wraps each call in a promise, so
+ * callers through `env.Hub.get(id)` receive promises (see {@link HubStub}).
+ * Declaring the contract here means a rename is a compile error instead of a
+ * silent runtime 500.
+ */
+export interface HubRpc {
+  /** Force a checkpoint now (manual trigger, ADR-006). */
+  checkpoint(): Promise<{ committed: boolean }>;
+  /** The repo's current manifest, for the live view's file list. */
+  manifest(): { entries: Record<string, ManifestEntry> };
+  /** Recent activity, for the live view on first load. */
+  recentEvents(): { events: HistoryEvent[] };
+}
 
 // ---------------------------------------------------------------------------
 // Parse helpers

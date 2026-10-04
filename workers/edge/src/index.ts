@@ -8,12 +8,13 @@
  */
 
 import { sha256Hex } from "@hyphae/core";
+import type { Hub } from "@hyphae/hub";
 import { routeAgentRequest } from "agents";
 
 export interface Env {
   BLOBS: R2Bucket;
   /** The Hub Durable Object namespace (bound as `Hub` in wrangler.toml). */
-  Hub: DurableObjectNamespace;
+  Hub: DurableObjectNamespace<Hub>;
   /** Static assets (apps/web/public): the live view. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
   /** Workers AI binding, passed through to the Hub. */
@@ -25,6 +26,8 @@ export interface Env {
 
 const SERVICE = "hyphae-edge" as const;
 const VERSION = "0.0.0" as const;
+/** Maximum blob size accepted at the edge, matching the protocol's inline cap. */
+const MAX_BLOB_BYTES = 1_500_000;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -44,7 +47,7 @@ export default {
     if (commitMatch && request.method === "POST") {
       const repoName = commitMatch[1] as string;
       const id = env.Hub.idFromName(repoName);
-      const stub = env.Hub.get(id) as unknown as { checkpoint(): Promise<{ committed: boolean }> };
+      const stub = env.Hub.get(id);
       const result = await stub.checkpoint();
       return Response.json(result);
     }
@@ -54,9 +57,7 @@ export default {
     if (manifestMatch && request.method === "GET") {
       const repoName = manifestMatch[1] as string;
       const id = env.Hub.idFromName(repoName);
-      const stub = env.Hub.get(id) as unknown as {
-        manifest(): Promise<{ entries: Record<string, unknown> }>;
-      };
+      const stub = env.Hub.get(id);
       return Response.json(await stub.manifest());
     }
 
@@ -65,16 +66,29 @@ export default {
     if (historyMatch && request.method === "GET") {
       const repoName = historyMatch[1] as string;
       const id = env.Hub.idFromName(repoName);
-      const stub = env.Hub.get(id) as unknown as {
-        recentEvents(): Promise<{ events: unknown[] }>;
-      };
+      const stub = env.Hub.get(id);
       return Response.json(await stub.recentEvents());
     }
 
     // Content upload (small files). In production this becomes an R2 presigned
     // PUT (ADR-020); this direct endpoint keeps the client simple for now.
     if (url.pathname === "/blobs" && request.method === "PUT") {
+      // Bound the body so a client cannot OOM the isolate or fill R2 with one
+      // request. Matches the protocol's inline-content ceiling (ADR-020).
+      const length = Number(request.headers.get("content-length") ?? "0");
+      if (length > MAX_BLOB_BYTES) {
+        return Response.json(
+          { error: "payload_too_large", limit: MAX_BLOB_BYTES },
+          { status: 413 },
+        );
+      }
       const bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.byteLength > MAX_BLOB_BYTES) {
+        return Response.json(
+          { error: "payload_too_large", limit: MAX_BLOB_BYTES },
+          { status: 413 },
+        );
+      }
       const hash = await sha256Hex(bytes);
       await env.BLOBS.put(hash, bytes);
       return Response.json({ hash });

@@ -63,8 +63,22 @@ async function main(): Promise<void> {
 
   if (command === "checkpoint") {
     const repo = positionals[1] ?? config.repo;
-    const res = await fetch(`${config.hub}/repos/${repo}/commit`, { method: "POST" });
-    const body = (await res.json()) as { committed?: boolean };
+    const res = await fetch(`${config.hub}/repos/${encodeURIComponent(repo)}/commit`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      process.stderr.write(`checkpoint failed: ${res.status} ${res.statusText}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    let body: { committed?: boolean } = {};
+    try {
+      body = (await res.json()) as { committed?: boolean };
+    } catch {
+      process.stderr.write("checkpoint failed: invalid response from hub\n");
+      process.exitCode = 1;
+      return;
+    }
     process.stdout.write(body.committed ? "checkpoint committed\n" : "nothing to commit\n");
     return;
   }

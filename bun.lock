@@ -89,6 +89,7 @@
       "dependencies": {
         "@hyphae/core": "workspace:*",
         "@hyphae/hub": "workspace:*",
+        "@hyphae/protocol": "workspace:*",
         "agents": "^0.26.0",
       },
     },

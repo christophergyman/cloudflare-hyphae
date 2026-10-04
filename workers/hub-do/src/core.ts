@@ -92,7 +92,7 @@ export class HubCore {
 
     // No collision: base matches current, accept directly.
     if (change.baseHash === currentHash) {
-      const entry = this.accept(change, change.newHash);
+      const entry = this.accept(change.path, change.actorId, change.ts, change.newHash);
       return { status: "accepted", entry };
     }
 
@@ -134,7 +134,7 @@ export class HubCore {
     if (merged.clean) {
       const mergedContent = new TextEncoder().encode(merged.content);
       const mergedHash = await sha256Hex(mergedContent);
-      const entry = this.accept(change, mergedHash);
+      const entry = this.accept(change.path, change.actorId, change.ts, mergedHash);
       return { status: "accepted", entry, mergedContent };
     }
 
@@ -142,22 +142,27 @@ export class HubCore {
   }
 
   /** Advance the manifest for a path and return the new entry. */
-  private accept(change: Change, newHash: string | null): ManifestEntry | undefined {
+  private accept(
+    path: string,
+    actorId: string,
+    ts: number,
+    newHash: string | null,
+  ): ManifestEntry | undefined {
     if (newHash === null) {
       // Tombstone (ADR-015): the path leaves the manifest.
-      this.manifest.delete(change.path);
-      this.metrics.write({ index: this.repoId, blobs: ["change", "delete", change.path] });
+      this.manifest.delete(path);
+      this.metrics.write({ index: this.repoId, blobs: ["change", "delete", path] });
       return undefined;
     }
-    const prev = this.manifest.get(change.path);
+    const prev = this.manifest.get(path);
     const entry: ManifestEntry = {
       blobHash: newHash,
       version: (prev?.version ?? 0) + 1,
-      updatedBy: change.actorId,
-      updatedAt: change.ts,
+      updatedBy: actorId,
+      updatedAt: ts,
     };
-    this.manifest.set(change.path, entry);
-    this.metrics.write({ index: this.repoId, blobs: ["change", "accept", change.path] });
+    this.manifest.set(path, entry);
+    this.metrics.write({ index: this.repoId, blobs: ["change", "accept", path] });
     return entry;
   }
 
@@ -193,7 +198,7 @@ export class HubCore {
       this.metrics.write({ index: this.repoId, blobs: ["merge", "stale-resolution", path] });
       return this.manifest.get(path);
     }
-    return this.accept({ path, actorId, ts } as Change, newHash);
+    return this.accept(path, actorId, ts, newHash);
   }
 
   private remember(id: string, result: ApplyResult): void {

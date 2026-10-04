@@ -15,7 +15,7 @@ import type { Change, ManifestEntry } from "@hyphae/core";
 import { sha256Hex } from "@hyphae/core";
 import type { AiBindingLike } from "@hyphae/merge-agent";
 import { createMergeRunner } from "@hyphae/merge-agent";
-import type { HistoryEvent } from "@hyphae/protocol";
+import type { HistoryEvent, HubRpc } from "@hyphae/protocol";
 import { parseClientMessage } from "@hyphae/protocol";
 import type { ArtifactsLike, R2BucketLike, RepoStore } from "@hyphae/repostore";
 import { ArtifactsRepoStore } from "@hyphae/repostore";
@@ -81,7 +81,7 @@ const HISTORY_LIMIT = 200;
 /** Artifacts repo name used for this Hub's checkpoints. */
 const STORE_REPO = "main";
 
-export class Hub extends Agent<HubEnv, Record<string, never>> {
+export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc {
   private core: HubCore | null = null;
   private readonly checkpoints = new CheckpointScheduler();
   private history: HistoryEvent[] = [];
@@ -115,12 +115,25 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
     return null;
   }
 
-  /** Ensure the Artifacts repo exists before the first commit. */
+  /**
+   * Ensure the Artifacts repo exists before the first commit.
+   *
+   * Checks for the repo first so the normal case does not rely on an error.
+   * If creation fails because another call raced us, that is fine; any other
+   * failure propagates, so a misconfigured binding is not silently ignored.
+   */
   private async ensureRepo(repo: string, store: RepoStore): Promise<void> {
     try {
-      await store.createRepo(repo);
+      if ((await store.readRef(repo, "heads/main")) !== null) return;
     } catch {
-      // Already exists: fine.
+      // The repo may not exist yet, or a transient read failed. Fall through and
+      // let create decide; a real failure will surface below.
+    }
+    try {
+      await store.createRepo(repo);
+    } catch (err) {
+      if (isAlreadyExistsError(err)) return;
+      throw err;
     }
   }
 
@@ -222,10 +235,16 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
     ctx: { request: Request },
   ): void {
     const url = new URL(ctx.request.url);
+    const kindParam = url.searchParams.get("kind");
     const state: ConnectionState = {
-      actorId: url.searchParams.get("actorId") ?? `anon-${connection.id.slice(0, 6)}`,
-      displayName: url.searchParams.get("displayName") ?? "anonymous",
-      kind: (url.searchParams.get("kind") as ConnectionState["kind"]) ?? "human",
+      actorId: (url.searchParams.get("actorId") ?? `anon-${connection.id.slice(0, 6)}`).slice(
+        0,
+        128,
+      ),
+      displayName: (url.searchParams.get("displayName") ?? "anonymous").slice(0, 128),
+      // Only accept the two known kinds. Anything else is coerced to "human"
+      // so a crafted value cannot reach the live view (stored-XSS guard).
+      kind: kindParam === "agent" ? "agent" : "human",
       observer: url.searchParams.get("observer") === "1",
     };
     connection.setState(state);
@@ -335,7 +354,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
           by: actorId,
         }),
       );
-      this.noteChangeForCheckpoint();
+      await this.noteChangeForCheckpoint();
       return;
     }
 
@@ -444,20 +463,30 @@ export class Hub extends Agent<HubEnv, Record<string, never>> {
         newHash: entry?.blobHash ?? hash,
       }),
     );
-    this.noteChangeForCheckpoint();
+    await this.noteChangeForCheckpoint();
   }
 
   /**
    * Mark a change as pending a checkpoint and make sure an alarm is set for the
    * next due time (ADR-006). Called after every accepted change.
    */
-  private noteChangeForCheckpoint(): void {
+  private async noteChangeForCheckpoint(): Promise<void> {
     this.checkpoints.onChange(Date.now());
     const next = this.checkpoints.nextCheckAt();
     if (next !== null) {
       // Arm the alarm. Setting it again simply moves it; the alarm handler
-      // re-arms if changes keep arriving before the ceiling.
-      void this.ctx.storage.setAlarm(next);
+      // re-arms if changes keep arriving before the ceiling. Surface a failure
+      // rather than dropping it: a lost alarm means changes never become durable.
+      try {
+        await this.ctx.storage.setAlarm(next);
+      } catch (err) {
+        await this.recordEvent({
+          kind: "change",
+          by: "hub",
+          detail: `alarm failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
+          at: Date.now(),
+        });
+      }
     }
   }
 
@@ -552,6 +581,20 @@ function parseClientMessageSafe(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "invalid message" };
   }
+}
+
+/**
+ * True when an error means "the repo already exists", the one create failure
+ * that is safe to ignore. Matches the Artifacts API's conflict signal, and any
+ * message that says so, without swallowing unrelated failures.
+ */
+function isAlreadyExistsError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const status =
+    (err as { status?: unknown }).status ?? (err as { statusCode?: unknown }).statusCode;
+  if (status === 409 || status === 400) return true;
+  const message = (err as { message?: unknown }).message;
+  return typeof message === "string" && /already exists|conflict/i.test(message);
 }
 
 function base64ToBytes(base64: string): Uint8Array {

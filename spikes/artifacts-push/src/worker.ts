@@ -15,9 +15,9 @@
  *   curl -X POST http://localhost:8787/push
  */
 
+import { MemoryFS } from "@hyphae/repostore";
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
-import { MemoryFS } from "@hyphae/repostore";
 
 export interface Env {
   ARTIFACTS: Artifacts;

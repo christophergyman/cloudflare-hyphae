@@ -56,6 +56,23 @@ export interface ArtifactsRepoStoreOptions {
  * return a string. The plaintext looks like `art_v2_<secret>?expires=<unix>`,
  * so strip the query before using it as the password.
  */
+/**
+ * True when a git error means "the ref/object does not exist" (an expected,
+ * empty-repo case), as opposed to a real failure. isomorphic-git tags these
+ * with `code: "NotFoundError"`; HTTP 404s from the remote are treated the same.
+ * Anything else must propagate, so a transient error never looks like data loss.
+ *
+ * Exported for tests: the classification is the whole point, so it is tested
+ * directly rather than only through a live git remote.
+ */
+export function isMissingRefError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const code = (err as { code?: unknown }).code;
+  if (code === "NotFoundError" || code === "ResolveRefError") return true;
+  const status = (err as { statusCode?: unknown }).statusCode;
+  return code === "HttpError" && status === 404;
+}
+
 function tokenSecret(token: string | ArtifactsToken): string {
   const plaintext = typeof token === "string" ? token : (token?.plaintext ?? "");
   return plaintext.split("?expires=")[0] ?? plaintext;
@@ -210,8 +227,12 @@ export class ArtifactsRepoStore implements RepoStore {
       });
       const main = res.find((r) => r.ref === "refs/heads/main");
       return main?.oid ?? null;
-    } catch {
-      return null;
+    } catch (err) {
+      // An empty repo legitimately has no refs. Anything else (auth, network,
+      // malformed remote) is a real failure we must not disguise as "empty",
+      // or the next commit would start from scratch and lose history.
+      if (isMissingRefError(err)) return null;
+      throw err;
     }
   }
 
@@ -219,8 +240,9 @@ export class ArtifactsRepoStore implements RepoStore {
     try {
       const { fs, dir } = await this.fsFor(repo);
       return await git.resolveRef({ fs, dir, ref: ref.replace(/^heads\//, "") });
-    } catch {
-      return null;
+    } catch (err) {
+      if (isMissingRefError(err)) return null;
+      throw err;
     }
   }
 
@@ -241,8 +263,9 @@ export class ArtifactsRepoStore implements RepoStore {
       const { fs, dir } = await this.fsFor(repo);
       const result = await git.readBlob({ fs, dir, oid: hash });
       return result.blob;
-    } catch {
-      return null;
+    } catch (err) {
+      if (isMissingRefError(err)) return null;
+      throw err;
     }
   }
 
