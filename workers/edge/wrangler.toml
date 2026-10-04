@@ -12,7 +12,7 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 # Always run the Worker first for API and agent routes so the SPA fallback
 # never intercepts WebSocket upgrades or REST calls.
-run_worker_first = ["/health", "/ai-check", "/repos/*", "/blobs/*", "/blobs", "/agents/*"]
+run_worker_first = ["/health", "/repos/*", "/blobs/*", "/blobs", "/agents/*"]
 
 # Blob content is content-addressed in R2 (ADR-004, ADR-020).
 [[r2_buckets]]

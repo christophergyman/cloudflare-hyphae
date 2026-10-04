@@ -72,6 +72,7 @@ export type {
   ArtifactsLike,
   ArtifactsRepoHandleLike,
   ArtifactsRepoStoreOptions,
+  ArtifactsToken,
 } from "./artifacts.ts";
 export { ArtifactsRepoStore, MemoryFS } from "./artifacts.ts";
 export { MemoryBlobStore, MemoryRepoStore } from "./memory.ts";

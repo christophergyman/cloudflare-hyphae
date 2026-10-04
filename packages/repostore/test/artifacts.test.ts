@@ -66,6 +66,44 @@ function fakeArtifacts() {
   };
 }
 
+/**
+ * A fake binding matching the real workerd shape: `createToken` returns an
+ * object `{ id, plaintext, scope, expiresAt }`, not a bare string. This is the
+ * regression guard for the bug that made live checkpoints throw
+ * `TypeError: token.split is not a function` (surfaced as error 1101).
+ */
+function fakeArtifactsObjectToken() {
+  return {
+    async create(name: string) {
+      return {
+        name,
+        remote: `http://localhost:${port}/${name}.git`,
+        token: {
+          id: "tok_create",
+          plaintext: "art_v2_fake_create?expires=9999999999",
+          scope: "write",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        },
+      };
+    },
+    async get(name: string) {
+      return {
+        async info() {
+          return { remote: `http://localhost:${port}/${name}.git` };
+        },
+        async createToken() {
+          return {
+            id: "tok_write",
+            plaintext: "art_v2_fake_write?expires=9999999999",
+            scope: "write",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+          };
+        },
+      };
+    },
+  };
+}
+
 describe("ArtifactsRepoStore end-to-end", () => {
   it("creates a repo and pushes a commit over smart HTTP", async () => {
     const store = new ArtifactsRepoStore(fakeArtifacts());
@@ -142,5 +180,26 @@ describe("ArtifactsRepoStore: deletions", () => {
       email: "cman@example.com",
     });
     expect((await store.readTree("delall", c2)).length).toBe(0);
+  });
+});
+
+describe("ArtifactsRepoStore: workerd token shape", () => {
+  it("commits when createToken returns an object, not a string", async () => {
+    const store = new ArtifactsRepoStore(fakeArtifactsObjectToken());
+    const ref = await store.createRepo("objtok");
+    expect(ref.remote).toContain("objtok.git");
+
+    const enc = new TextEncoder();
+    const commit = await store.writeCommit(
+      "objtok",
+      null,
+      [{ path: "hello.txt", content: enc.encode("hello\nworld\n") }],
+      "object token commit",
+      { name: "cman", email: "cman@example.com" },
+    );
+    expect(typeof commit).toBe("string");
+    const tree = await store.readTree("objtok", commit);
+    expect(tree.length).toBe(1);
+    expect(new TextDecoder().decode(tree[0]?.content)).toBe("hello\nworld\n");
   });
 });

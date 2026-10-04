@@ -88,6 +88,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@hyphae/hub": "workspace:*",
+        "@hyphae/repostore": "workspace:*",
         "agents": "^0.26.0",
       },
     },

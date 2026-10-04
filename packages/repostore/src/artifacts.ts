@@ -18,13 +18,27 @@ import type { CommitAuthor, CommitHash, RepoRef, RepoStore, TreeFile } from "./i
 
 /** Minimal structural view of the Artifacts Workers binding. */
 export interface ArtifactsLike {
-  create(name: string): Promise<{ name: string; remote: string; token: string }>;
+  create(name: string): Promise<{ name: string; remote: string; token: unknown }>;
   get(name: string): Promise<ArtifactsRepoHandleLike>;
+}
+
+/**
+ * The token shape returned by the Artifacts binding's `createToken`.
+ *
+ * In workerd the binding returns an object (`{ id, plaintext, scope, expiresAt }`),
+ * not a bare string. Older/other adapters may return a plain string, so both
+ * are accepted and normalized by {@link tokenSecret}.
+ */
+export interface ArtifactsToken {
+  id?: string;
+  plaintext: string;
+  scope?: string;
+  expiresAt?: string;
 }
 
 export interface ArtifactsRepoHandleLike {
   info(): Promise<{ remote: string } | null>;
-  createToken(scope?: "read" | "write", ttl?: number): Promise<string>;
+  createToken(scope?: "read" | "write", ttl?: number): Promise<string | ArtifactsToken>;
 }
 
 /**
@@ -216,9 +230,16 @@ export interface ArtifactsRepoStoreOptions {
   tokenTtlSeconds?: number;
 }
 
-function tokenSecret(token: string): string {
-  // Artifacts tokens look like art_v1_<secret>?expires=<unix>.
-  return token.split("?expires=")[0] ?? token;
+/**
+ * Normalize an Artifacts token to the bare secret used for git Basic auth.
+ *
+ * The workerd binding returns an object (`{ plaintext, ... }`); other paths may
+ * return a string. The plaintext looks like `art_v2_<secret>?expires=<unix>`,
+ * so strip the query before using it as the password.
+ */
+function tokenSecret(token: string | ArtifactsToken): string {
+  const plaintext = typeof token === "string" ? token : (token?.plaintext ?? "");
+  return plaintext.split("?expires=")[0] ?? plaintext;
 }
 
 /**
@@ -246,7 +267,8 @@ export class ArtifactsRepoStore implements RepoStore {
   async createRepo(name: string): Promise<RepoRef> {
     const created = await this.artifacts.create(name);
     this.remotes.set(name, created.remote);
-    return { name, remote: created.remote, token: created.token };
+    const token = created.token ? tokenSecret(created.token as string | ArtifactsToken) : undefined;
+    return { name, remote: created.remote, token };
   }
 
   private async remoteFor(repo: string): Promise<string> {
