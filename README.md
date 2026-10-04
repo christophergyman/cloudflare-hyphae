@@ -10,7 +10,7 @@ A repo whose files stay in sync live across a team, backed by real git history o
 
 Hyphae is a new kind of shared repository for teams where every engineer runs one or more AI coding agents on the same code. Instead of branches, worktrees, and pull requests that collide at merge time, the working files simply stay in sync across the team, continuously, and any real conflict is resolved automatically and verifiably.
 
-If you are an AI agent picking this repo up: read this file, then the two documents in `docs/`. They are the source of truth. This README tells you what the project is, the rules that must not be broken, and where everything lives.
+If you are an AI agent picking this repo up: read this file, then the documents in `docs/`. They are the source of truth. This README tells you what the project is, the rules that must not be broken, and where everything lives.
 
 ---
 
@@ -57,6 +57,50 @@ We do not invent a merge engine. We sync at the **file** level and let **git** m
 
 ---
 
+## The Hub orchestrates; it does not do the heavy lifting
+
+The Hub is the conductor, not the orchestra. It is deliberately thin: it decides and coordinates, and delegates the expensive work. That separation is why it stays fast and why big files never bottleneck it.
+
+```
+                        ┌─────────────────────────┐
+        clients  ◄─────►│        THE HUB          │◄─────► WebSocket clients
+       (control)        │  (one Agent per repo)   │
+                        │                         │
+                        │  the authority:         │
+                        │  who changed what       │
+                        │  is this a collision?   │
+                        │  broadcast the result   │
+                        └────┬───────┬───────┬────┘
+                             │       │       │
+              content?  ─────┘       │       └───── heavy merge?
+                                     │
+                              durability?                ┌───────────────┐
+                                     │                   │  WORKFLOW +   │
+                                     ▼                   │  CONTAINER    │
+                              ┌─────────────┐            │  + AI model   │
+                              │  ARTIFACTS  │            └───────────────┘
+                              │  (git)      │
+                              └─────────────┘
+                                     ▲
+                              ┌─────────────┐
+                              │     R2      │  content is fetched by clients
+                              │  (blobs)    │  directly, not through the Hub
+                              └─────────────┘
+```
+
+| The Hub owns (the brain) | It delegates (the muscle) |
+|---|---|
+| The manifest: current version of every file | File content to **R2** |
+| Deciding "clean update or collision?" via `baseHash` | The heavy merge job to a **Workflow plus Container** |
+| Running the fast git 3-way merge | Model calls to **AI Gateway** |
+| Broadcasting changes to clients | Durable git history to **Artifacts** |
+| Presence: who is connected, who touched what | Metrics to **Analytics Engine** |
+| Checkpoint scheduling (quiet, ceiling, manual) | Long file transfers to **R2 presigned URLs** |
+
+**The Hub decides; R2, Artifacts, Workflows, and the model do.**
+
+---
+
 ## Status
 
 - **Phase:** specification complete, no code yet.
@@ -88,7 +132,7 @@ These are decided. Do not silently change them. If a change is genuinely needed,
 3. **One Durable Object (the Hub) per repo is the live authority.** No CRDTs, no distributed convergence math.
 4. **The Hub holds only the manifest.** All file content lives in R2, content-addressed. The Hub never stores file bytes.
 5. **Git merge first, then the agent, then keep both.** Deterministic and cheap first, intelligent second, always lossless.
-6. **The merging agent must be generative and verified.** It runs in a Cloudflare Sandbox and its result is accepted only if the build and tests pass.
+6. **The merging agent must be generative and verified.** It runs in an isolated Cloudflare Container and its result is accepted only if the build and tests pass.
 7. **Bind agents, do not run them.** Any harness participates via the CLI and the MCP server. The client watcher captures edits automatically; coordination must not depend on agents calling tools.
 8. **Trust is membership based.** Being in the repo means full trust. Identity exists for attribution and revocation, not for gates.
 9. **The client watcher ignores its own writes.** Echo suppression and minimal change detection is the core of the client.
@@ -117,16 +161,17 @@ The rejected v1 design lives at `docs/archive/hyphae-adr-v1-live-ops.md`. It is 
 | Need | Cloudflare primitive |
 |---|---|
 | Durable versioned storage, git history, clones | **Artifacts** |
-| Live per-repo authority, sync, WebSockets | **Durable Objects** |
+| Live per-repo authority, sync, WebSockets | **Durable Objects** via the **Agents SDK `Agent`** |
 | Edge API, auth, routing | **Workers** |
-| Blob content, snapshots | **R2** |
+| Blob content, direct transfer | **R2** with presigned URLs |
 | Durable merge job (resolve + verify + commit) | **Workflows** |
-| Code-capable model calls | **Workers AI** via **AI Gateway** |
-| Isolated space to resolve and run tests | **Sandboxes / Containers** |
+| Code-capable model calls | **AI Gateway** (frontier model, Workers AI fallback) |
+| Isolated space to resolve and run tests | **Containers** (`ctx.container`) |
+| Metrics and the moat signal | **Workers Analytics Engine** |
 | Metadata, attribution (later) | **D1** |
 | Agent participation | **MCP server + CLI** |
 
-Full detail is in `docs/hyphae-adr.md`.
+Full detail is in `docs/hyphae-adr.md` and `docs/hyphae-stack.md`.
 
 ---
 
@@ -140,9 +185,9 @@ This does not exist yet. It is the target for Phase 0.
   /mcp            TS          MCP server for agents
   /web            TS          simple live view
 /workers
-  /edge           TS          auth, routing, REST, WebSocket upgrade
-  /hub-do         TS          the Hub Durable Object
-  /merge-workflow TS          Workflow: model merge + sandbox verify + commit
+  /edge           TS          auth, routing, REST, WebSocket upgrade, blob presign
+  /hub-do         TS          the Hub (Agents SDK Agent)
+  /merge-workflow TS          Workflow: model merge + container verify + commit
 /packages
   /core           TS          domain: Repo, Manifest, Change, Conflict, Actor
   /merge          TS          diff3 merge + merging-agent interface (runtime-agnostic)
@@ -151,7 +196,7 @@ This does not exist yet. It is the target for Phase 0.
 /infra
   wrangler.toml, R2 bucket, Container/Dockerfile, Workflow + AI Gateway config
 /docs
-  hyphae-prd.md, hyphae-adr.md, archive/
+  hyphae-prd.md, hyphae-adr.md, hyphae-stack.md, hyphae-plan.md, hyphae-context.md, archive/
 ```
 
 ---
@@ -160,9 +205,9 @@ This does not exist yet. It is the target for Phase 0.
 
 - **Language:** TypeScript everywhere.
 - **Client runtime:** Bun (the CLI plus the local file-watching daemon).
-- **Cloudflare runtime:** Workers and Durable Objects (workerd).
+- **Cloudflare runtime:** Workers and Durable Objects (workerd), with the Hub on the **Agents SDK** and the merge verifier on **Containers** (`ctx.container`).
 - **Shared code rule:** shared packages use web-standard APIs only, so they run in both workerd and Bun.
-- **Requirements:** a Workers Paid plan (about $5/mo). Artifacts, Sandboxes/Containers, Workflows, and the good Workers AI code models all need it.
+- **Requirements:** a Workers Paid plan (about $5/mo). Artifacts, Containers, Workflows, and the good Workers AI code models all need it.
 - **Performance escape hatch:** keep the merge/apply logic in `packages/merge` pure and runtime-agnostic, so it could later be compiled to WASM if needed. Do not optimize prematurely.
 
 ---
@@ -178,7 +223,7 @@ This does not exist yet. It is the target for Phase 0.
 | **Conflict** | The same file changed in two places at once. |
 | **Blob** | File content, content-addressed in R2. |
 | **Manifest** | The Hub's map of path to current blob version. |
-| **Merging agent** | A generative model in a sandbox that resolves conflicts and proves the result with tests. |
+| **Merging agent** | A generative model in an isolated container that resolves conflicts and proves the result with tests. |
 | **Actor** | A human or an agent, with identity, for attribution and revocation. |
 
 ---
@@ -187,12 +232,12 @@ This does not exist yet. It is the target for Phase 0.
 
 The full, checkpointed build sequence lives in `docs/hyphae-plan.md`. Short version, in risk order:
 
-1. **Phase 0** Monorepo scaffold, contracts, and the `RepoStore` port.
+1. **Phase 0** Monorepo scaffold, contracts, the `RepoStore` port, and six spikes.
 2. **Phase 1** `packages/merge`: the diff3 merge core with property tests.
-3. **Phase 2** The Hub Durable Object and the live sync loop.
+3. **Phase 2** The Hub (Agents SDK `Agent`) and the live sync loop.
 4. **Phase 3** The **client watcher spike** (the riskiest path and the demo's heart).
 5. **Phase 4** Checkpoints to Artifacts, plus Hub restart and replay.
-6. **Phase 5** The merge Workflow: model call, Sandbox with tests, commit only on green (**demo line**).
+6. **Phase 5** The merge Workflow: model call, Container with tests, commit only on green (**demo line**).
 7. **Phase 6** CLI, MCP server, and live view (**MVP line**).
 8. **Phases 7 to 10** Hardening, demo night, then the moat and scale layers.
 
