@@ -43,8 +43,8 @@ export const helloMessageSchema = z.object({
 
 /**
  * A file change. Exactly one of `newHash` (by reference, the normal path) or
- * `content` (base64, small files only) must be present. `newHash: null` plus
- * no content means a tombstone (delete).
+ * `contentBase64` (base64, small files only) must be present. `newHash: null`
+ * with no content means a tombstone (delete).
  */
 export const changeMessageSchema = z
   .object({
@@ -56,10 +56,34 @@ export const changeMessageSchema = z
     contentBase64: z.string().optional(),
     sig: z.string().optional(),
   })
-  .refine(
-    (m) => m.newHash !== undefined || m.contentBase64 !== undefined,
-    "a change must carry either newHash or contentBase64",
-  );
+  .superRefine((m, ctx) => {
+    const hasContent = m.contentBase64 !== undefined;
+    const hasHash = m.newHash !== undefined;
+    // Exactly one representation: a by-reference hash OR inline content, never
+    // both (that would let hash and bytes disagree) and never neither.
+    if (hasContent && hasHash) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "a change must not carry both newHash and contentBase64",
+        path: ["newHash"],
+      });
+    }
+    if (!hasContent && !hasHash) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "a change must carry either newHash or contentBase64",
+        path: ["newHash"],
+      });
+    }
+    // A tombstone (newHash null) cannot also carry inline content.
+    if (hasContent && m.newHash === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "a change cannot be both a tombstone (newHash null) and inline content",
+        path: ["contentBase64"],
+      });
+    }
+  });
 
 export const ackMessageSchema = z.object({
   type: z.literal("ack"),

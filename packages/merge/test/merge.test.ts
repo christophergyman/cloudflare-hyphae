@@ -61,6 +61,37 @@ describe("mergeFile", () => {
     expect(r.clean).toBe(true);
     if (r.clean) expect(r.content).toBe("b");
   });
+
+  // Two different insertions at the same anchor are genuinely ambiguous, so
+  // they conflict. Verified against `git merge-file`, which also conflicts.
+  it("does not duplicate an identical insertion when both sides append the same line", () => {
+    // Both sides insert X at the same anchor; disjoint edits are separate.
+    const r = mergeFile("a\nb\n", "a\nX\nb\n", "a\nX\nb\n");
+    expect(r.clean).toBe(true);
+    if (r.clean) expect(r.content).toBe("a\nX\nb\n");
+  });
+
+  it("reports a conflict for two different insertions at the same anchor", () => {
+    const r = mergeFile("a\nb\n", "a\nX\nb\na2\n", "a\nY\nb\nb2\n");
+    expect(r.clean).toBe(false);
+  });
+
+  it("merges an identical insertion plus a disjoint edit cleanly", () => {
+    // Both insert X at the top anchor; only ours edits the tail, only theirs
+    // edits elsewhere. Tail and elsewhere are single-owner chunks.
+    const r = mergeFile("a\nb\nc\n", "a\nX\nb\na2\nc\n", "a\nX\nb\nc\nc2\n");
+    expect(r.clean).toBe(true);
+    if (r.clean) expect(r.content).toBe("a\nX\nb\na2\nc\nc2\n");
+  });
+
+  it("does not silently drop lines when both sides edit many regions", () => {
+    const base = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n";
+    const ours = "L1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n";
+    const theirs = "l1\nl2\nl3\nL4\nl5\nl6\nl7\nL8\n";
+    const r = mergeFile(base, ours, theirs);
+    expect(r.clean).toBe(true);
+    if (r.clean) expect(r.content).toBe("L1\nl2\nl3\nL4\nl5\nl6\nl7\nL8\n");
+  });
 });
 
 describe("looksBinary", () => {

@@ -62,7 +62,9 @@ export class MemoryRepoStore implements RepoStore {
     const tree: StoredCommit["tree"] = [];
     for (const file of files) {
       const hash = await sha256Hex(file.content);
-      r.blobs.set(hash, file.content);
+      // Copy on write so a caller mutating its buffer cannot corrupt the blob
+      // or desync it from the recorded hash (content addressing must hold).
+      r.blobs.set(hash, file.content.slice());
       tree.push({ path: file.path, blobHash: hash, mode: defaultMode(file.mode) });
     }
     tree.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
@@ -90,12 +92,13 @@ export class MemoryRepoStore implements RepoStore {
     return stored.tree.map((entry) => {
       const content = r.blobs.get(entry.blobHash);
       if (!content) throw new Error(`missing blob: ${entry.blobHash}`);
-      return { path: entry.path, content, mode: entry.mode };
+      return { path: entry.path, content: content.slice(), mode: entry.mode };
     });
   }
 
   async readBlob(repo: string, hash: string): Promise<Uint8Array | null> {
-    return this.must(repo).blobs.get(hash) ?? null;
+    const blob = this.must(repo).blobs.get(hash);
+    return blob ? blob.slice() : null;
   }
 
   /** Test helper: the stored commit record, if present. */
@@ -109,11 +112,12 @@ export class MemoryBlobStore implements BlobStore {
   private readonly blobs = new Map<string, Uint8Array>();
 
   async put(hash: string, bytes: Uint8Array): Promise<void> {
-    this.blobs.set(hash, bytes);
+    this.blobs.set(hash, bytes.slice());
   }
 
   async get(hash: string): Promise<Uint8Array | null> {
-    return this.blobs.get(hash) ?? null;
+    const blob = this.blobs.get(hash);
+    return blob ? blob.slice() : null;
   }
 
   async has(hash: string): Promise<boolean> {

@@ -80,6 +80,21 @@ export function repoStorePortSuite(name: string, makeStore: () => RepoStore): vo
       expect(await store.readBlob("demo", "deadbeef")).toBeNull();
     });
 
+    it("does not alias caller buffers (content addressing must hold)", async () => {
+      const store = makeStore();
+      await store.createRepo("demo");
+      const buf = enc.encode("v1\n");
+      const commit = await store.writeCommit("demo", null, [{ path: "m.txt", content: buf }], "m", {
+        name: "cman",
+        email: "cman@example.com",
+      });
+      // Mutating the caller's buffer must not change what was stored.
+      buf.set(enc.encode("XX\n"));
+      const tree = await store.readTree("demo", commit);
+      const entry = tree.find((f) => f.path === "m.txt");
+      expect(dec.decode(entry?.content)).toBe("v1\n");
+    });
+
     it("reads blob content back by the hash recorded in the tree", async () => {
       const store = makeStore();
       await store.createRepo("demo");
@@ -126,6 +141,19 @@ export function blobStorePortSuite(name: string, makeStore: () => BlobStore): vo
       await store.put("h2", enc.encode("a"));
       await store.put("h2", enc.encode("a"));
       expect(dec.decode((await store.get("h2")) as Uint8Array)).toBe("a");
+    });
+
+    it("does not alias caller buffers or returned buffers", async () => {
+      const store = makeStore();
+      const buf = enc.encode("orig");
+      await store.put("h3", buf);
+      buf.set(enc.encode("mut!"));
+      // Stored value is unaffected by the caller mutating its buffer.
+      const first = (await store.get("h3")) as Uint8Array;
+      expect(dec.decode(first)).toBe("orig");
+      // Mutating a returned buffer does not change the stored value either.
+      first.set(enc.encode("evil"));
+      expect(dec.decode((await store.get("h3")) as Uint8Array)).toBe("orig");
     });
   });
 }

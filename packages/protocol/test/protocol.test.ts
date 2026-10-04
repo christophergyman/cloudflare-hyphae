@@ -52,6 +52,43 @@ describe("protocol", () => {
     expect(result).toBe(false);
   });
 
+  it("accepts a tombstone (newHash null, no content)", () => {
+    const msg = parseClientMessage({
+      type: "change",
+      id: "t1",
+      path: "gone.ts",
+      baseHash: "abc",
+      newHash: null,
+    });
+    expect(msg.type).toBe("change");
+  });
+
+  it("rejects a change carrying both newHash and contentBase64", () => {
+    expect(
+      parseClientMessageSafe({
+        type: "change",
+        id: "c4",
+        path: "x",
+        baseHash: null,
+        newHash: "abc",
+        contentBase64: "aGk=",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a tombstone that also carries contentBase64", () => {
+    expect(
+      parseClientMessageSafe({
+        type: "change",
+        id: "c5",
+        path: "x",
+        baseHash: null,
+        newHash: null,
+        contentBase64: "aGk=",
+      }),
+    ).toBe(false);
+  });
+
   it("parses a hub changed message", () => {
     const msg = parseHubMessage({
       type: "changed",

@@ -4,18 +4,20 @@ import { blobStorePortSuite } from "./suites.ts";
 
 blobStorePortSuite("in-memory", () => new MemoryBlobStore());
 
-/** A tiny in-memory stand-in for an R2 bucket binding. */
+/** A tiny in-memory stand-in for an R2 bucket binding. R2 copies bytes at the
+ * storage boundary, so this fake copies too. */
 function fakeBucket(): R2BucketLike {
   const map = new Map<string, Uint8Array>();
   return {
     async put(key, value) {
-      map.set(key, value);
+      map.set(key, value.slice());
       return {};
     },
     async get(key) {
       const value = map.get(key);
       if (!value) return null;
-      return { arrayBuffer: async () => value.slice().buffer as ArrayBuffer };
+      const copy = value.slice();
+      return { arrayBuffer: async () => copy.buffer as ArrayBuffer };
     },
     async head(key) {
       return map.has(key) ? {} : null;
