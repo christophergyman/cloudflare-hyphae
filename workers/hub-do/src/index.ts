@@ -50,6 +50,11 @@ export interface HubEnv {
   MODEL?: string;
   /** Optional per-repo test command for verification. */
   TEST_COMMAND?: string;
+  /**
+   * Artifacts repo name used for this Hub's checkpoints. Defaults to "main".
+   * This is the repo, not the branch; the git ref stays "heads/main".
+   */
+  STORE_REPO?: string;
 }
 
 /**
@@ -76,8 +81,6 @@ export interface ConnectionState {
 }
 
 const MANIFEST_KEY = "manifest";
-/** Artifacts repo name used for this Hub's checkpoints. */
-const STORE_REPO = "main";
 
 export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc {
   private core: HubCore | null = null;
@@ -93,6 +96,14 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
       await this.loadManifest();
       await this.history.load();
     });
+  }
+
+  /**
+   * The Artifacts repo name for checkpoints. Configurable via `env.STORE_REPO`;
+   * defaults to "main". The git ref ("heads/main") is the branch and is fixed.
+   */
+  private get storeRepo(): string {
+    return this.env.STORE_REPO ?? "main";
   }
 
   /**
@@ -498,9 +509,9 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     if (!store) return { committed: false };
     const generation = this.checkpoints.generation;
     const core = this.ensureCore();
-    await this.ensureRepo(STORE_REPO, store);
+    await this.ensureRepo(this.storeRepo, store);
     const result = await runCheckpoint(store, {
-      repo: STORE_REPO,
+      repo: this.storeRepo,
       entries: core.manifestEntries(),
       readBlob: this.blobReader(),
       message,

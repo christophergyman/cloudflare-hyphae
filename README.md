@@ -6,6 +6,17 @@ A repo whose files stay in sync live across a team, backed by real git history o
 
 ---
 
+## Getting started
+
+To run the demo on your own Cloudflare account, follow **`docs/deploy-your-own.md`**
+(Bun, a Workers Paid plan, and Artifacts open beta are the prerequisites).
+
+Each workspace has a short guide next to its code: `packages/core`, `packages/protocol`,
+`packages/repostore`, `packages/merge`, `packages/merge-agent`, `workers/edge`,
+`workers/hub-do`, `workers/merge-workflow`, `apps/client`, and `apps/cli`.
+
+---
+
 ## What this is
 
 Hyphae is a new kind of shared repository for teams where every engineer runs one or more AI coding agents on the same code. Instead of branches, worktrees, and pull requests that collide at merge time, the working files simply stay in sync across the team, continuously, and any real conflict is resolved automatically and verifiably.

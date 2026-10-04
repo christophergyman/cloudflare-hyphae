@@ -43,5 +43,6 @@ new_sqlite_classes = ["Hub"]
 [vars]
 ENVIRONMENT = "development"
 # A frontier-scale open coding model available on Workers AI. The merge agent
-# needs a generative code model (ADR-014).
+# needs a generative code model (ADR-014). Keep this in sync with the single
+# source of truth: DEFAULT_MERGE_MODEL in packages/merge-agent/src/model.ts.
 MODEL = "@cf/moonshotai/kimi-k2.7-code"
