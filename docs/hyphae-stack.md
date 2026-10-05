@@ -27,17 +27,17 @@ This document does not decide architecture (the ADR does). It pins the libraries
 | Client runtime | Bun | Fast startup for the daemon | The daemon uses `node:fs` where needed |
 | Edge runtime | Workers (workerd) with a pinned `compatibility_date` | Cloudflare default | Bump the date deliberately, not blindly |
 | Hub | **Agents SDK `Agent`** on a Durable Object, one per repo (ADR-017) | State, hibernating WebSockets, scheduling, RPC, observability for free | Drop to the raw DO API for the hot sync loop if the framework fights it |
-| Hub storage | **SQLite-backed Durable Object** (`ctx.storage.sql`) (ADR-019) | Recommended, GA, 10 GB per object | 2 MB per key+value; manifest entries are tiny |
+| Hub storage | **SQLite-backed Durable Object** via the KV-style `ctx.storage` API (`get`/`put`/`delete`/`list`) (ADR-019) | Simple key/value access on a GA store, 10 GB per object | Per-path `manifest:` keys; `ctx.storage.sql` is a valid alternative when a queryable store is needed |
 | Hub connections | **WebSocket Hibernation API** with `serializeAttachment` (ADR-019) | No duration charge while idle | Presence from `ctx.getWebSockets()` |
 | Hub scheduling | **Durable Object alarms** driven by the Agent SDK scheduler (ADR-019) | Checkpoint cadence without blocking hibernation | Quiescence and ceiling logic lives here |
-| MCP surface | **Agents SDK `McpAgent` / `createMcpHandler`** (ADR-013, ADR-017) | MCP with OAuth and hibernation, no hand-rolled transport | Supports the MCP 2026-07-28 spec |
+| MCP surface | **Agents SDK `McpAgent` / `createMcpHandler`** (ADR-013, ADR-017) | MCP with OAuth and hibernation, no hand-rolled transport | Planned (Phase 6), not built yet; targets the MCP 2026-07-28 spec |
 | Blob store | **R2**, content-addressed `sha256` keys (ADR-004) | Cheap, egress-free | |
-| Blob transport | **R2 presigned PUT/GET URLs**; small files inline under about 256 KB (ADR-020) | Protects the DO memory and CPU budget | Needs S3 credentials or the Workers presign path at the edge |
+| Blob transport | **Worker-proxied R2** (`/blobs` PUT/GET) now; **R2 presigned PUT/GET URLs** deferred; small files inline under about 256 KB (ADR-020) | Protects the DO memory and CPU budget | Presign needs S3 credentials or the Workers presign path; the edge Worker proxies with a 1.5 MB cap today |
 | Hashing | WebCrypto `sha256` | Works in both runtimes | No Node `crypto` |
 | Durable history | **Artifacts**: binding for create/fork/inspect/tokens, **isomorphic-git** to commit and push (ADR-018) | The binding cannot write files, so git it is | **Verify the push in a Phase 0 spike** |
 | Worker git | `isomorphic-git` plus an in-memory FS | The documented Artifacts pattern | Worker memory bounds tree size; push incremental packs |
 | Durable jobs | **Workflows** | Durable multi-step merge job with retries | |
-| Merge engine | Pure-JS diff3 (for example `node-diff3`) wrapped in `packages/merge` (ADR-005) | Small, swappable | Hand-roll a Myers diff3 if the library hurts |
+| Merge engine | Hand-rolled pure-JS diff3 in `packages/merge`, no dependency (ADR-005) | Small, swappable, runtime-agnostic | Swap in `node-diff3` only if the hand-rolled core ever hurts |
 | Merging agent model | **AI Gateway**: frontier code model primary, Workers AI fallback (ADR-021) | Resilience, cost control, provider-agnostic | |
 | Provider keys | **Secrets Store** via AI Gateway BYOK (ADR-021) | Centralized, referenced not pasted | |
 | Merge verification | **Containers via `ctx.container`**, `durable_object` policy, **snapshots**; **Dynamic Workers** fast path for JS/TS (ADR-014) | Fast, safe, warm images | Legacy `Container`/`Sandbox` classes end Dec 31, 2026; snapshot support is public beta |
@@ -107,7 +107,7 @@ This document does not decide architecture (the ADR does). It pins the libraries
 
 ## Status caveats (Oct 2026)
 
-- **Agents SDK:** v0.20.0, tracks the MCP 2026-07-28 spec.
+- **Agents SDK:** `^0.26.0`, tracks the MCP 2026-07-28 spec.
 - **Artifacts:** open beta; binding cannot write files; billing active.
 - **Containers `durable_object` policy and snapshots:** public beta. Legacy `Container`/`Sandbox` supported through Dec 31, 2026.
 - **Dynamic Workers (Worker Loader):** open beta.

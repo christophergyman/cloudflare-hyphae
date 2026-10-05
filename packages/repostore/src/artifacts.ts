@@ -1,3 +1,4 @@
+/// <reference lib="esnext.disposable" />
 /**
  * The Artifacts adapter for RepoStore (ADR-007, ADR-018).
  *
@@ -22,15 +23,34 @@ import { fileMatches, replaceTree, stageAll } from "./tree-ops.ts";
 
 export type { ArtifactsToken } from "./token.ts";
 
-/** Minimal structural view of the Artifacts Workers binding. */
+/**
+ * Minimal structural view of the Artifacts Workers binding.
+ *
+ * `create` returns plain metadata, not a capability, so it has nothing to
+ * release. `get` returns a disposable repo capability; see
+ * {@link ArtifactsRepoHandleLike}.
+ */
 export interface ArtifactsLike {
   create(name: string): Promise<{ name: string; remote: string; token: unknown }>;
   get(name: string): Promise<ArtifactsRepoHandleLike>;
 }
 
+/**
+ * The repo capability returned by `Artifacts.get`.
+ *
+ * It is an RPC stub that must be released before the request ends, so the
+ * binding docs declare it with `using` (`using repo = await
+ * env.ARTIFACTS.get(name)`) and the real handle implements `Disposable` via
+ * `[Symbol.dispose]()`. The member is optional here so this minimal,
+ * runtime-agnostic interface is still satisfied by fakes and by older bindings
+ * that expose no disposal member.
+ *
+ * @see https://developers.cloudflare.com/artifacts/api/workers-binding/
+ */
 export interface ArtifactsRepoHandleLike {
   info(): Promise<{ remote: string } | null>;
   createToken(scope?: "read" | "write", ttl?: number): Promise<string | ArtifactsToken>;
+  [Symbol.dispose]?(): void;
 }
 
 export interface ArtifactsRepoStoreOptions {
@@ -87,6 +107,8 @@ export class ArtifactsRepoStore implements RepoStore {
   }
 
   async createRepo(name: string): Promise<RepoRef> {
+    // `create` returns plain metadata (name/remote/token), not a disposable
+    // capability, so unlike `get` there is no handle to release here.
     const created = await this.artifacts.create(name);
     this.remotes.set(name, created.remote);
     const token = created.token ? tokenSecret(created.token as string | ArtifactsToken) : undefined;
@@ -97,16 +119,26 @@ export class ArtifactsRepoStore implements RepoStore {
     const cached = this.remotes.get(repo);
     if (cached) return cached;
     const handle = await this.artifacts.get(repo);
-    const info = await handle.info();
-    if (!info) throw new Error(`unknown Artifacts repo: ${repo}`);
-    this.remotes.set(repo, info.remote);
-    return info.remote;
+    // Release the RPC capability even if info() throws. The binding docs use
+    // `using` for this; optional chaining keeps fakes with no disposal working.
+    try {
+      const info = await handle.info();
+      if (!info) throw new Error(`unknown Artifacts repo: ${repo}`);
+      this.remotes.set(repo, info.remote);
+      return info.remote;
+    } finally {
+      handle[Symbol.dispose]?.();
+    }
   }
 
   private async writeToken(repo: string): Promise<string> {
     const handle = await this.artifacts.get(repo);
-    const token = await handle.createToken("write", this.tokenTtl);
-    return tokenSecret(token);
+    try {
+      const token = await handle.createToken("write", this.tokenTtl);
+      return tokenSecret(token);
+    } finally {
+      handle[Symbol.dispose]?.();
+    }
   }
 
   /**

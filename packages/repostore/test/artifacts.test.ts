@@ -104,6 +104,90 @@ function fakeArtifactsObjectToken() {
   };
 }
 
+/**
+ * A fake binding whose `get` handle records disposal, matching the real
+ * workerd shape where `ArtifactsRepo` implements `Disposable`. `create` returns
+ * plain metadata, so only `get` handles should ever be disposed.
+ */
+function fakeArtifactsDisposable() {
+  const disposed: string[] = [];
+  return {
+    disposed,
+    async create(name: string) {
+      return {
+        name,
+        remote: `http://localhost:${port}/${name}.git`,
+        token: "art_v1_fake?expires=9999999999",
+      };
+    },
+    async get(name: string) {
+      return {
+        async info() {
+          return { remote: `http://localhost:${port}/${name}.git` };
+        },
+        async createToken() {
+          return "art_v1_fake?expires=9999999999";
+        },
+        [Symbol.dispose]() {
+          disposed.push(name);
+        },
+      };
+    },
+  };
+}
+
+describe("ArtifactsRepoStore: handle disposal", () => {
+  it("disposes every handle it gets after a write", async () => {
+    const artifacts = fakeArtifactsDisposable();
+    const store = new ArtifactsRepoStore(artifacts);
+    await store.writeCommit(
+      "dispose1",
+      null,
+      [{ path: "a.txt", content: new TextEncoder().encode("hi\n") }],
+      "commit",
+      { name: "cman", email: "cman@example.com" },
+    );
+    // remoteFor and writeToken each fetched a handle; both must be released.
+    expect(artifacts.disposed).toEqual(["dispose1", "dispose1"]);
+  });
+
+  it("disposes the handle even when info() throws", async () => {
+    const disposed: string[] = [];
+    const store = new ArtifactsRepoStore({
+      async create() {
+        throw new Error("unused");
+      },
+      async get(name: string) {
+        return {
+          async info(): Promise<never> {
+            throw new Error("boom");
+          },
+          async createToken() {
+            return "t";
+          },
+          [Symbol.dispose]() {
+            disposed.push(name);
+          },
+        };
+      },
+    });
+    await expect(store.readRef("infoerr", "main")).rejects.toThrow("boom");
+    expect(disposed).toEqual(["infoerr"]);
+  });
+
+  it("works when a handle has no disposal member (optional chaining)", async () => {
+    const store = new ArtifactsRepoStore(fakeArtifacts());
+    const commit = await store.writeCommit(
+      "nodispose",
+      null,
+      [{ path: "a.txt", content: new TextEncoder().encode("hi\n") }],
+      "commit",
+      { name: "cman", email: "cman@example.com" },
+    );
+    expect(commit).toMatch(/^[0-9a-f]{40}$/);
+  });
+});
+
 describe("ArtifactsRepoStore end-to-end", () => {
   it("creates a repo and pushes a commit over smart HTTP", async () => {
     const store = new ArtifactsRepoStore(fakeArtifacts());
