@@ -53,6 +53,11 @@ export interface HubEnv {
   AI?: AiBindingLike;
   /** Model name for the AI merge. */
   MODEL?: string;
+  /**
+   * AI Gateway id for the merge model (ADR-021). Optional; when absent the
+   * model calls Workers AI directly.
+   */
+  AI_GATEWAY_ID?: string;
   /** Optional per-repo test command for verification. */
   TEST_COMMAND?: string;
   /**
@@ -155,6 +160,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
     return createMergeRunner({
       ai,
       model: this.env.MODEL,
+      gateway: this.env.AI_GATEWAY_ID,
       testCommand: this.env.TEST_COMMAND,
     });
   }

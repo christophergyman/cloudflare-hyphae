@@ -62,7 +62,8 @@ The other bindings work as-is:
 | `AI` | Workers AI | Model calls for the merge agent |
 | `Hub` | Durable Object | One Hub per repo |
 | `ASSETS` | Static assets (`apps/web/public`) | The live view |
-| `MODEL` | Var | Merge model; default matches `packages/merge-agent/src/model.ts` |
+| `MODEL` | Var (optional) | Overrides the merge model; default is `DEFAULT_MERGE_MODEL` in `packages/merge-agent/src/model.ts` |
+| `AI_GATEWAY_ID` | Var (optional) | Routes merge model calls through AI Gateway (ADR-021) |
 
 `compatibility_flags = ["nodejs_compat"]` is required and already set.
 
@@ -76,7 +77,7 @@ export { Hub } from "@hyphae/hub";
 ```
 
 Wrangler sees that re-export and bundles the Hub into the same Worker, so the
-`[[durable_objects.bindings]]` and `[[migrations]]` entries in the toml resolve
+`[[durable_objects.bindings]]` and `[exports.Hub]` entries in the toml resolve
 without a second deploy.
 
 ```
@@ -84,7 +85,8 @@ cd workers/edge
 bunx wrangler deploy
 ```
 
-The first deploy runs migration `v1` and creates the SQLite-backed `Hub` class.
+The first deploy creates the SQLite-backed `Hub` class from the declarative
+`[exports.Hub]` entry.
 Wrangler prints the deployed URL, for example
 `https://hyphae-edge.<your-subdomain>.workers.dev`. Use that URL below.
 
@@ -109,8 +111,8 @@ The deployment entry is `src/worker.ts`. It exports:
   `scheduling_policy = "durable_object"`. The verifier writes the candidate
   tree into the container and runs the project's test command there.
 
-It reads the same `MODEL` default (kept in sync with
-`packages/merge-agent/src/model.ts`).
+It uses the same default merge model as the Hub (`DEFAULT_MERGE_MODEL` in
+`packages/merge-agent/src/model.ts`) unless `MODEL` is set to override it.
 
 ### Trigger and check a merge
 
@@ -163,8 +165,10 @@ binding named `AI`. To route model calls through **AI Gateway** (caching, rate
 limits, fallback, provider keys):
 
 1. Create a gateway in the Cloudflare dashboard under AI Gateway.
-2. Point the `AI` binding at the gateway, or configure the gateway upstream of
-   Workers AI. See `docs/hyphae-stack.md` for the intended wiring.
+2. Set `AI_GATEWAY_ID` to the gateway id in `workers/edge/wrangler.toml` (and
+   `workers/merge-workflow/wrangler.toml`). The Hub passes it to the merge model,
+   which routes the call through the gateway (ADR-021). Leave it unset to call
+   Workers AI directly. See `docs/hyphae-stack.md` for the intended wiring.
 3. For an external provider, keep the provider key out of source. Store it with
    Secrets Store or:
 
@@ -229,5 +233,6 @@ See `apps/cli/README.md` and `apps/client/README.md` for the watcher details.
   the binding in `wrangler.toml`.
 - **413 on `/blobs`:** the body exceeded the 1.5 MB inline cap. Presigned R2
   URLs are designed but not implemented (`/blobs/presign` returns 501).
-- **Model mismatch:** `MODEL` in both `wrangler.toml` files must equal
-  `DEFAULT_MERGE_MODEL` in `packages/merge-agent/src/model.ts`.
+- **Model override:** `MODEL` is optional. When set in a `wrangler.toml` it must
+  be a valid Workers AI model. The default is `DEFAULT_MERGE_MODEL` in
+  `packages/merge-agent/src/model.ts`.

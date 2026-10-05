@@ -3,6 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Structured logs and traces, visible in the dashboard and `wrangler tail`.
+[observability]
+enabled = true
+
 # Serve the live view (apps/web/public) from the same Worker. API routes
 # (/health, /repos, /blobs, /agents) are handled in code first; everything else
 # falls through to these static assets.
@@ -36,13 +40,36 @@ binding = "AI"
 name = "Hub"
 class_name = "Hub"
 
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["Hub"]
+# Declarative Durable Object export (preferred over [[migrations]]). This
+# creates and migrates the SQLite-backed Hub class on deploy.
+[exports.Hub]
+type = "durable-object"
+storage = "sqlite"
 
+# Top-level vars apply to the default `wrangler deploy`, which targets the live
+# Worker, so this is production. Wrangler does not inherit bindings into a named
+# environment, so per-environment overrides repeat them (see [env.staging]).
 [vars]
-ENVIRONMENT = "development"
-# A frontier-scale open coding model available on Workers AI. The merge agent
-# needs a generative code model (ADR-014). Keep this in sync with the single
-# source of truth: DEFAULT_MERGE_MODEL in packages/merge-agent/src/model.ts.
-MODEL = "@cf/moonshotai/kimi-k2.7-code"
+ENVIRONMENT = "production"
+
+# The merge model default is DEFAULT_MERGE_MODEL in
+# packages/merge-agent/src/model.ts. Set MODEL here only to override it.
+# MODEL = "@cf/moonshotai/kimi-k2.7-code"
+
+# Optional AI Gateway id (ADR-021). Leave unset to call Workers AI directly;
+# set it to route merge model calls through a gateway.
+# AI_GATEWAY_ID = "<gateway-id>"
+
+# Example only: staging is not deployed. Every binding and var must be repeated
+# per named environment because wrangler does not inherit them.
+# [env.staging.vars]
+# ENVIRONMENT = "staging"
+# [[env.staging.durable_objects.bindings]]
+# name = "Hub"
+# class_name = "Hub"
+# [env.staging.exports.Hub]
+# type = "durable-object"
+# storage = "sqlite"
+# [[env.staging.r2_buckets]]
+# binding = "BLOBS"
+# bucket_name = "hyphae-blobs"

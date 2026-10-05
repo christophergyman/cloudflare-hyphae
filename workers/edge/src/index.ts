@@ -17,10 +17,15 @@ export interface Env {
   Hub: DurableObjectNamespace<Hub>;
   /** Static assets (apps/web/public): the live view. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
-  /** Workers AI binding, passed through to the Hub. */
-  AI?: { run(model: string, options: unknown): Promise<unknown> };
+  /**
+   * Workers AI binding, passed through to the Hub. The optional third argument
+   * carries AI Gateway routing (ADR-021).
+   */
+  AI?: { run(model: string, options: unknown, extra?: unknown): Promise<unknown> };
   /** Merge model name (see wrangler.toml). */
   MODEL?: string;
+  /** AI Gateway id for the merge model (ADR-021). Optional. */
+  AI_GATEWAY_ID?: string;
   ENVIRONMENT?: string;
 }
 

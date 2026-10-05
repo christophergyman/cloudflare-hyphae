@@ -3,6 +3,10 @@ main = "src/worker.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Structured logs and traces, visible in the dashboard and `wrangler tail`.
+[observability]
+enabled = true
+
 # Model calls go through AI Gateway (ADR-021). Route to Workers AI or an
 # external provider by configuring the gateway, then point AI here.
 [ai]
@@ -33,6 +37,9 @@ type = "durable-object"
 storage = "sqlite"
 
 [vars]
-# Keep this in sync with the single source of truth: DEFAULT_MERGE_MODEL in
-# packages/merge-agent/src/model.ts.
-MODEL = "@cf/moonshotai/kimi-k2.7-code"
+# The merge model default is DEFAULT_MERGE_MODEL in
+# packages/merge-agent/src/model.ts. Set MODEL here only to override it.
+# MODEL = "@cf/moonshotai/kimi-k2.7-code"
+
+# Optional AI Gateway id (ADR-021). Leave unset to call Workers AI directly.
+# AI_GATEWAY_ID = "<gateway-id>"

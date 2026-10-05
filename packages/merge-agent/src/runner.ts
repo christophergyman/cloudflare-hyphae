@@ -43,6 +43,11 @@ export interface CreateMergeRunnerOptions {
   sandbox?: SandboxLike;
   /** Model name; defaults to {@link DEFAULT_MERGE_MODEL}. */
   model?: string;
+  /**
+   * AI Gateway id to route model calls through (ADR-021). Optional; when
+   * absent the model calls Workers AI directly.
+   */
+  gateway?: string;
   /** Explicit test command override. */
   testCommand?: string;
 }
@@ -83,6 +88,7 @@ export function createMergeRunner(options: CreateMergeRunnerOptions) {
   const model: MergeModel = createAiMergeModel({
     ai: options.ai,
     model: options.model ?? DEFAULT_MERGE_MODEL,
+    gateway: options.gateway,
   });
   const verifier: SandboxVerifier = options.sandbox
     ? sandboxVerifier(options.sandbox)

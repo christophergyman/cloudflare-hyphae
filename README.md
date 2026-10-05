@@ -181,7 +181,7 @@ The rejected v1 design lives at `docs/archive/hyphae-adr-v1-live-ops.md`. It is 
 | Edge API, auth, routing | **Workers** |
 | Blob content, direct transfer | **R2** (Worker-proxied `/blobs`; presigned URLs deferred) |
 | Durable merge job (resolve + verify + commit) | **Workflows** (wired in `workers/merge-workflow`: `MergeWorkflow` + `[[workflows]]`) |
-| Code-capable model calls | **AI Gateway** (frontier model, Workers AI fallback) |
+| Code-capable model calls | **AI Gateway** when `AI_GATEWAY_ID` is set, otherwise Workers AI direct (ADR-021) |
 | Isolated space to resolve and run tests | **Containers** via `ctx.container` (`durable_object` policy, wired in `workers/merge-workflow`'s `Sandbox` DO) |
 | Metrics and the moat signal | **Workers Analytics Engine** |
 | Metadata, attribution (later) | **D1** |
@@ -208,7 +208,7 @@ Full detail is in `docs/hyphae-adr.md` and `docs/hyphae-stack.md`.
   /repostore      TS          RepoStore port + Artifacts adapter
   /protocol       TS          WebSocket and REST schemas (shared, versioned)
 /infra
-  container/Dockerfile (optional baked image for the wired Sandbox DO; AI Gateway binding is designed, not wired)
+  container/Dockerfile (optional baked image for the wired Sandbox DO; AI Gateway routing is wired via the optional AI_GATEWAY_ID var)
 /docs
   hyphae-prd.md, hyphae-adr.md, hyphae-stack.md, hyphae-plan.md, hyphae-context.md, archive/
 ```

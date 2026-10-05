@@ -12,7 +12,10 @@ import type { ConflictInput, MergeModel, ModelResolution } from "./agent.ts";
 
 /** Minimal structural view of the Workers AI binding. */
 export interface AiBindingLike {
-  run(model: string, options: unknown): Promise<unknown>;
+  // The optional third argument carries AI Gateway routing (ADR-021). Workers
+  // AI accepts it after the model name and inputs, so widening the signature
+  // here keeps the two-argument direct path valid.
+  run(model: string, options: unknown, extra?: unknown): Promise<unknown>;
 }
 
 /** Default model. A frontier open coding model available on Workers AI. */
@@ -75,6 +78,12 @@ export interface OpenAiMergeModelOptions {
   ai?: AiBindingLike;
   /** Model name; defaults to {@link DEFAULT_MERGE_MODEL}. */
   model?: string;
+  /**
+   * AI Gateway id to route the call through (ADR-021: all model calls go
+   * through AI Gateway). When absent, the call goes straight to Workers AI,
+   * so existing deployments behave exactly as before.
+   */
+  gateway?: string;
   /** Confidence to report for a non-empty result. Defaults to 0.8. */
   confidence?: number;
 }
@@ -84,16 +93,22 @@ export interface OpenAiMergeModelOptions {
  * model abstains, which drives the agent to keep both sides (never discard).
  */
 export function createAiMergeModel(options: OpenAiMergeModelOptions): MergeModel {
-  const { ai, model = DEFAULT_MERGE_MODEL, confidence = 0.8 } = options;
+  const { ai, model = DEFAULT_MERGE_MODEL, confidence = 0.8, gateway } = options;
   return {
     async resolve(input: ConflictInput): Promise<ModelResolution> {
       if (!ai) return { content: null };
-      const result = await ai.run(model, {
+      const inputs = {
         messages: [
           { role: "system", content: MERGE_SYSTEM_PROMPT },
           { role: "user", content: buildMergePrompt(input) },
         ],
-      });
+      };
+      // ADR-021: route through AI Gateway when a gateway is configured. With no
+      // gateway the call is the original two-argument Workers AI call, so
+      // absent config changes nothing.
+      const result = gateway
+        ? await ai.run(model, inputs, { gateway: { id: gateway } })
+        : await ai.run(model, inputs);
       const content = stripFences(extractText(result));
       if (content.trim().length === 0) return { content: null };
       return { content, confidence };
