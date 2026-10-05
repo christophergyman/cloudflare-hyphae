@@ -11,6 +11,13 @@ import { sha256Hex } from "@hyphae/core";
 import type { Hub } from "@hyphae/hub";
 import { routeAgentRequest } from "agents";
 
+/**
+ * Hand-written bindings. `wrangler types` cannot be adopted here: its generated
+ * `Cloudflare.Env` requires `BLOBS: R2Bucket`, but the Hub Durable Object
+ * bundled into this Worker (`[exports.Hub]`) declares `HubEnv.BLOBS?:
+ * R2BucketLike`, so the Agents SDK's `Agent<Env extends Cloudflare.Env>`
+ * constraint fails. Regenerate after `HubEnv` is reconciled.
+ */
 export interface Env {
   BLOBS: R2Bucket;
   /** The Hub Durable Object namespace (bound as `Hub` in wrangler.toml). */

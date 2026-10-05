@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { CheckpointScheduler } from "../src/checkpoint.ts";
+import { CheckpointScheduler, planCheckpointSchedule } from "../src/checkpoint.ts";
 
 describe("CheckpointScheduler", () => {
   it("is idle and not due before any change", () => {
@@ -69,5 +69,44 @@ describe("CheckpointScheduler: change during commit", () => {
     const gen = s.generation;
     s.onCommitted(gen);
     expect(s.hasPending).toBe(false);
+  });
+});
+
+describe("planCheckpointSchedule", () => {
+  const callback = "onCheckpointDue";
+
+  it("cancels stale checkpoint schedules and arms the next due time", () => {
+    const plan = planCheckpointSchedule({
+      nextCheckAt: 31_000,
+      schedules: [
+        { id: "old-1", callback },
+        { id: "old-2", callback },
+        { id: "unrelated", callback: "someOtherJob" },
+      ],
+      callback,
+    });
+    // Only checkpoint schedules are cancelled; other SDK work is left alone.
+    expect(plan.cancelIds).toEqual(["old-1", "old-2"]);
+    expect(plan.armAt).toBe(31_000);
+  });
+
+  it("cancels but does not arm when the scheduler is idle", () => {
+    const plan = planCheckpointSchedule({
+      nextCheckAt: null,
+      schedules: [{ id: "stale", callback }],
+      callback,
+    });
+    expect(plan.cancelIds).toEqual(["stale"]);
+    expect(plan.armAt).toBeNull();
+  });
+
+  it("arms without cancelling when no checkpoint schedule exists", () => {
+    const plan = planCheckpointSchedule({
+      nextCheckAt: 1_000,
+      schedules: [{ id: "other", callback: "someOtherJob" }],
+      callback,
+    });
+    expect(plan.cancelIds).toEqual([]);
+    expect(plan.armAt).toBe(1_000);
   });
 });

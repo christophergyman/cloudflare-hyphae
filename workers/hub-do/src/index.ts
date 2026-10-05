@@ -19,7 +19,7 @@ import type { ArtifactsLike, R2BucketLike, RepoStore } from "@hyphae/repostore";
 import { ArtifactsRepoStore } from "@hyphae/repostore";
 import { Agent } from "agents";
 import { blobReader, storeInline } from "./blobs.ts";
-import { CheckpointScheduler } from "./checkpoint.ts";
+import { CheckpointScheduler, planCheckpointSchedule } from "./checkpoint.ts";
 import { runCheckpoint } from "./checkpoint-runner.ts";
 import { HubCore, type HubCoreOptions, loadManifestEntries, persistManifestEntry } from "./core.ts";
 import { isAlreadyExistsError, parseClientMessageSafe } from "./helpers.ts";
@@ -29,6 +29,13 @@ import { tryResolveConflict } from "./merge-coordinator.ts";
 import { presenceMessage } from "./presence.ts";
 
 export type { MergeRunner } from "./merge-coordinator.ts";
+
+/**
+ * Name of the Agent SDK schedule callback that runs the checkpoint. It must
+ * match the {@link Hub.onCheckpointDue} method so the SDK's scheduler resolver
+ * can find it on the Hub.
+ */
+const CHECKPOINT_CALLBACK = "onCheckpointDue" as const;
 
 export interface HubEnv {
   /** Content-addressed blob store (ADR-004). */
@@ -358,39 +365,68 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
   }
 
   /**
-   * Mark a change as pending a checkpoint and make sure an alarm is set for the
-   * next due time (ADR-006). Called after every accepted change.
+   * Mark a change as pending a checkpoint and make sure the Agent SDK has a
+   * schedule armed for the next due time (ADR-006). Called after every
+   * accepted change.
    */
   private async noteChangeForCheckpoint(): Promise<void> {
     this.checkpoints.onChange(Date.now());
-    await this.armCheckpointAlarm();
+    await this.syncCheckpointSchedule();
   }
 
   /**
-   * Arm the alarm for the next due checkpoint, if any. Setting it again simply
-   * moves it. Surface a failure rather than dropping it: a lost alarm means
-   * changes never become durable.
+   * Ensure exactly one checkpoint schedule is armed for `nextCheckAt()`.
+   *
+   * The Agent SDK owns the Durable Object alarm through its `Lifecycle`, so the
+   * Hub never calls `ctx.storage.setAlarm` (which would clobber SDK-scheduled
+   * work). It uses the SDK scheduler instead:
+   *   - `Agent.schedule(when, callback, payload?, options?): Promise<Schedule>`
+   *     creates a one-shot schedule at `when`.
+   *   - `Agent.listSchedules(criteria?): Promise<Schedule[]>` and
+   *     `Agent.cancelSchedule(id): Promise<boolean>` let us remove the previous
+   *     arm first, because a one-shot `schedule()` is not idempotent and would
+   *     otherwise accumulate stale rows across re-arms and DO evictions.
+   * Signatures cited from `agents@0.26.0` (`node_modules/agents/dist`).
+   *
+   * Surface a failure rather than dropping it: a lost schedule means changes
+   * never become durable.
    */
-  private async armCheckpointAlarm(): Promise<void> {
-    const next = this.checkpoints.nextCheckAt();
-    if (next === null) return;
+  private async syncCheckpointSchedule(): Promise<void> {
     try {
-      await this.ctx.storage.setAlarm(next);
+      const schedules = await this.listSchedules();
+      const { cancelIds, armAt } = planCheckpointSchedule({
+        nextCheckAt: this.checkpoints.nextCheckAt(),
+        schedules,
+        callback: CHECKPOINT_CALLBACK,
+      });
+      for (const id of cancelIds) await this.cancelSchedule(id);
+      if (armAt !== null) await this.schedule(new Date(armAt), CHECKPOINT_CALLBACK);
     } catch (err) {
       await this.history.record({
         kind: "change",
         by: "hub",
-        detail: `alarm failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
+        detail: `schedule failed: ${err instanceof Error ? err.message : String(err)}`.slice(
+          0,
+          200,
+        ),
         at: Date.now(),
       });
     }
   }
 
-  /** Agent alarm hook: commit when the scheduler says a checkpoint is due. */
-  override async alarm(): Promise<void> {
-    await super.alarm();
+  /**
+   * Agent SDK schedule callback: commit when the scheduler says a checkpoint is
+   * due, then re-arm if changes are still pending. Re-arming covers a change
+   * that landed while the commit was in flight, and a commit that could not
+   * read all content and must be retried.
+   *
+   * The SDK resolves this name to a method on the Hub and invokes it inside the
+   * Lifecycle host boundary (see the `Scheduler` callback resolver in
+   * `agents@0.26.0`), so it is the migration of the old `alarm()` hook.
+   */
+  async onCheckpointDue(): Promise<void> {
     await this.maybeCheckpoint();
-    await this.armCheckpointAlarm();
+    await this.syncCheckpointSchedule();
   }
 
   /** Commit to durable history if the scheduler says it is due. */

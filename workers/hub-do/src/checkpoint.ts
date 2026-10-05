@@ -8,7 +8,8 @@
  *   - manual:      an explicit trigger (CLI / REST)
  *
  * The scheduler is pure and time is injected, so it is fully testable without
- * timers. The Hub wires it to Durable Object alarms.
+ * timers. The Hub wires it to the Agent SDK scheduler, which owns the Durable
+ * Object alarm (ADR-019).
  */
 
 export interface CheckpointConfig {
@@ -96,4 +97,39 @@ export class CheckpointScheduler {
   get hasPending(): boolean {
     return this.state.phase === "pending";
   }
+}
+
+/**
+ * The subset of an Agent SDK schedule the checkpoint reconciler needs.
+ * Structurally compatible with the SDK's `Schedule` type.
+ */
+export interface ScheduledCheckpoint {
+  id: string;
+  callback: string;
+}
+
+/**
+ * Reconcile the Hub's one pending checkpoint with the schedules the Agent SDK
+ * currently holds.
+ *
+ * The SDK's one-shot `schedule(when, callback)` is not idempotent by default,
+ * so moving an armed checkpoint means cancelling the old row and creating a
+ * new one; there is no in-place update. Returning the decision as plain data
+ * keeps it testable without a Durable Object: the Hub cancels `cancelIds`, then
+ * arms a single new schedule at `armAt` when it is non-null.
+ *
+ * Pure: no time, storage, or SDK access.
+ */
+export function planCheckpointSchedule(input: {
+  /** When the next checkpoint is due, or null when idle. */
+  nextCheckAt: number | null;
+  /** Schedules currently registered with the Agent SDK. */
+  schedules: ReadonlyArray<ScheduledCheckpoint>;
+  /** The callback name the Hub uses for checkpoint schedules. */
+  callback: string;
+}): { cancelIds: string[]; armAt: number | null } {
+  const cancelIds = input.schedules
+    .filter((schedule) => schedule.callback === input.callback)
+    .map((schedule) => schedule.id);
+  return { cancelIds, armAt: input.nextCheckAt };
 }
