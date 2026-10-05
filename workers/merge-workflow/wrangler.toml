@@ -1,5 +1,5 @@
 name = "hyphae-merge-workflow"
-main = "src/index.ts"
+main = "src/worker.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
@@ -8,11 +8,29 @@ compatibility_flags = ["nodejs_compat"]
 [ai]
 binding = "AI"
 
+# The durable merge job (ADR-014). The MergeWorkflow class lives in
+# src/workflow.ts and is exported from the deployment entry.
+[[workflows]]
+name = "merge-workflow"
+binding = "MERGE_WORKFLOW"
+class_name = "MergeWorkflow"
+
 # Isolated container that runs the project's build and tests (ADR-014).
-# The Container/Sandbox class is bound here; see infra/container/Dockerfile.
-# Replace with your container application binding when deploying.
-# [[containers]]
-# class_name = "Sandbox"
+# The `durable_object` policy lets the Sandbox Durable Object pick the image at
+# start time, so the Cloudflare-managed `cloudflare/debian-trixie` image needs
+# no build. Switch to a named image built from infra/container/Dockerfile when
+# you want git and a pinned Node baked in (requires Docker at deploy time).
+[[containers]]
+class_name = "Sandbox"
+scheduling_policy = "durable_object"
+
+[[durable_objects.bindings]]
+name = "SANDBOX"
+class_name = "Sandbox"
+
+[exports.Sandbox]
+type = "durable-object"
+storage = "sqlite"
 
 [vars]
 # Keep this in sync with the single source of truth: DEFAULT_MERGE_MODEL in

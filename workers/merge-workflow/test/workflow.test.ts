@@ -48,6 +48,26 @@ describe("runConflictJob", () => {
     expect(out.path).toBe("f.txt");
     expect(out.content).toBe("a\nMERGED\nc\n");
   });
+
+  it("keeps both sides when no sandbox can verify", async () => {
+    const env: MergeWorkflowEnv = {
+      AI: {
+        async run() {
+          return { response: "a\nMERGED\nc\n" };
+        },
+      },
+      TEST_COMMAND: "bun test",
+    };
+    const out = await runConflictJob(env, {
+      repoId: "r",
+      path: "f.txt",
+      base: "a\nb\nc\n",
+      ours: "a\nOURS\nc\n",
+      theirs: "a\nTHEIRS\nc\n",
+    });
+    expect(out.status).toBe("kept-both");
+    expect(out.reason).toContain("no sandbox configured");
+  });
 });
 
 describe("buildMergePrompt", () => {

@@ -90,22 +90,71 @@ Wrangler prints the deployed URL, for example
 
 ## 6. Optional: deploy the merge Workflow
 
-The verified merge Workflow is **optional** for the demo. It currently ships as
-wiring (`makeMergeRunner`, `runConflictJob` in `workers/merge-workflow/src`) and
-the `[[containers]]` binding is commented out in its `wrangler.toml`. Without a
-Sandbox/container binding the merge agent refuses to accept unverified model
-output and keeps both sides, which is the safe default.
-
-If you want the Workflow deployed as its own Worker:
+The verified merge Workflow is a real Worker: a `WorkflowEntrypoint` plus a
+container-backed Sandbox Durable Object. It is **optional** for the demo (the Hub
+still resolves conflicts inline), but deploying it gives you the durable,
+test-verified merge path from ADR-014.
 
 ```
 cd workers/merge-workflow
 bunx wrangler deploy
 ```
 
+The deployment entry is `src/worker.ts`. It exports:
+
+- `MergeWorkflow` (`src/workflow.ts`), bound as `MERGE_WORKFLOW` through
+  `[[workflows]]`. Its `run` calls `runConflictJob` inside a single `step.do`,
+  so a merge is persisted and retried durably.
+- `Sandbox`, a Durable Object bound as `SANDBOX` through `[[containers]]` with
+  `scheduling_policy = "durable_object"`. The verifier writes the candidate
+  tree into the container and runs the project's test command there.
+
 It reads the same `MODEL` default (kept in sync with
-`packages/merge-agent/src/model.ts`). To make it actually verify merges, add a
-container binding and a Workflow entrypoint; see `docs/hyphae-adr.md` ADR-014.
+`packages/merge-agent/src/model.ts`).
+
+### Trigger and check a merge
+
+`POST /merge` takes a `ConflictJob` JSON body and returns the instance id with
+`202`:
+
+```
+export WORKFLOW_URL=https://hyphae-merge-workflow.<your-subdomain>.workers.dev
+curl -s -X POST $WORKFLOW_URL/merge \
+  -H 'content-type: application/json' \
+  -d '{"repoId":"demo","path":"src/app.ts","base":"a\nb\nc\n","ours":"a\nOURS\nc\n","theirs":"a\nTHEIRS\nc\n"}'
+# {"id":"<instance-id>"}
+```
+
+`GET /merge/:id` returns the Workflow instance status (including the
+`MergeWorkflowResult` in `output` once complete):
+
+```
+curl -s $WORKFLOW_URL/merge/<instance-id>
+```
+
+`GET /health` returns `{"ok":true}`.
+
+### Container
+
+The container is wired with the Cloudflare-managed `cloudflare/debian-trixie`
+image and the `durable_object` scheduling policy, so no image build is needed
+and `wrangler deploy --dry-run` passes without Docker. The Sandbox DO starts the
+image on first use and runs the project's tests with outbound Internet enabled
+so dependencies can install.
+
+To bake git and a pinned Node into the image instead, build the repo Dockerfile
+as a named image. This requires Docker on the machine that runs `wrangler
+deploy`:
+
+```
+# in workers/merge-workflow/wrangler.toml
+[containers.images.sandbox]
+dockerfile = "../../infra/container/Dockerfile"
+```
+
+Then start `ctx.container.images.sandbox` in `Sandbox` instead of the managed
+image string. Before running untrusted repos, add an egress intercept
+(`interceptAllOutboundHttp`) or pre-bake dependencies, per ADR-014.
 
 ## 7. AI Gateway and secrets
 

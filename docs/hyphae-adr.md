@@ -237,6 +237,7 @@ updateRef(name, ref, hash) -> void
   - Keep the model key in the Worker; the container never sees it (egress injects it, or Secrets Store via AI Gateway).
   - One container per merge; never share across tasks.
   - Cap model turns/cost and treat repo and test output as untrusted to limit prompt injection.
+  - **Implementation status (2026-10-05):** the Workflow and container are wired in `workers/merge-workflow`. `MergeWorkflow` (a `WorkflowEntrypoint` bound via `[[workflows]]`) runs `runConflictJob` inside one `step.do`; the `Sandbox` Durable Object uses the `durable_object` policy and starts the Cloudflare-managed `cloudflare/debian-trixie` image, so no image build is needed and `wrangler deploy --dry-run` passes without Docker. The class is a plain `DurableObject` using `ctx.container`, not the legacy `Container` / `Sandbox` class. `infra/container/Dockerfile` remains the production image for git and a pinned Node (it requires Docker at deploy time). Still open: the Hub resolves inline and keeps both sides because it does not bind the Sandbox; egress interception and filesystem snapshots are not yet wired.
 - **Consequences:** Requires Workers Paid. The `durable_object` scheduling policy and snapshots are public beta. Cost is cents per merge, dominated by inference.
 
 ### ADR-015: Deletes, renames, and binaries

@@ -120,7 +120,7 @@ The Hub is the conductor, not the orchestra. It is deliberately thin: it decides
 - **Live view (`apps/web`):** a read-only dashboard served as a static asset from the edge Worker. Shows connected actors, current files and versions, a live activity feed (changes, clean merges, conflicts, agent resolutions), and a file preview from R2. The Hub keeps the last 200 events so the feed is populated on open.
 - **Spike 1 (Artifacts write path):** proven locally against a real git server (commit, incremental push, clone-back).
 - **Live and proven:** Artifacts checkpoints. The edge Worker binds `ARTIFACTS`, the Hub builds its durable store from it, and `POST /repos/:name/commit` returns `{"committed":true}`.
-- **Built, not wired live:** the AI merge. The merge agent is built and unit-tested, but no sandbox/container binding exists, so `mergeRunner()` always keeps both sides.
+- **Built and wired as its own Worker:** the AI merge. `workers/merge-workflow` now ships a real `MergeWorkflow` (`[[workflows]]`) plus a container-backed `Sandbox` Durable Object (`[[containers]]`, `durable_object` policy). The Hub's inline path still keeps both sides because the Hub does not bind the Sandbox; route conflicts to the Workflow to get verified merges.
 - Cloudflare Artifacts is in open beta and available on the Workers Paid plan.
 
 ---
@@ -180,9 +180,9 @@ The rejected v1 design lives at `docs/archive/hyphae-adr-v1-live-ops.md`. It is 
 | Live per-repo authority, sync, WebSockets | **Durable Objects** via the **Agents SDK `Agent`** |
 | Edge API, auth, routing | **Workers** |
 | Blob content, direct transfer | **R2** (Worker-proxied `/blobs`; presigned URLs deferred) |
-| Durable merge job (resolve + verify + commit) | **Workflows** (designed, not wired) |
+| Durable merge job (resolve + verify + commit) | **Workflows** (wired in `workers/merge-workflow`: `MergeWorkflow` + `[[workflows]]`) |
 | Code-capable model calls | **AI Gateway** (frontier model, Workers AI fallback) |
-| Isolated space to resolve and run tests | **Containers** (`ctx.container`) (designed, not wired) |
+| Isolated space to resolve and run tests | **Containers** via `ctx.container` (`durable_object` policy, wired in `workers/merge-workflow`'s `Sandbox` DO) |
 | Metrics and the moat signal | **Workers Analytics Engine** |
 | Metadata, attribution (later) | **D1** |
 | Agent participation | **MCP server + CLI** |
@@ -208,7 +208,7 @@ Full detail is in `docs/hyphae-adr.md` and `docs/hyphae-stack.md`.
   /repostore      TS          RepoStore port + Artifacts adapter
   /protocol       TS          WebSocket and REST schemas (shared, versioned)
 /infra
-  container/Dockerfile (Workflow and AI Gateway bindings are designed, not wired)
+  container/Dockerfile (optional baked image for the wired Sandbox DO; AI Gateway binding is designed, not wired)
 /docs
   hyphae-prd.md, hyphae-adr.md, hyphae-stack.md, hyphae-plan.md, hyphae-context.md, archive/
 ```
