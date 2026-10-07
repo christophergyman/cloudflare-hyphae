@@ -89,6 +89,11 @@ export async function tryResolveConflict(
       detail: `merge failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
       at: Date.now(),
     });
+    // Tell live clients the agent is done and both sides were kept, so the
+    // conflict no longer looks in-flight (the protocol's `keptBoth` flag).
+    deps.broadcast(
+      JSON.stringify({ type: "conflict", changeId: change.id, path: change.path, keptBoth: true }),
+    );
     return;
   }
 
@@ -101,6 +106,9 @@ export async function tryResolveConflict(
       detail: `kept both: ${outcome.reason ?? "unresolved"}`.slice(0, 200),
       at: Date.now(),
     });
+    deps.broadcast(
+      JSON.stringify({ type: "conflict", changeId: change.id, path: change.path, keptBoth: true }),
+    );
     return;
   }
 

@@ -297,6 +297,8 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
       ts: Date.now(),
     };
 
+    const priorVersion = core.manifestEntries()[change.path]?.version ?? 0;
+
     const result = await core.apply(change, blobReader(this.env.BLOBS));
 
     if (result.status === "duplicate") {
@@ -309,13 +311,18 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
         const hash = result.entry?.blobHash;
         if (hash) await this.env.BLOBS?.put(hash, result.mergedContent);
       }
+      // A tombstone removes the manifest entry, so the new version comes from
+      // the prior entry plus one. Without this, deletes would broadcast
+      // version 0 and every client would treat them as stale (lost delete).
+      const deleted = result.entry === undefined;
+      const version = result.entry?.version ?? priorVersion + 1;
       await this.persistManifest(change.path, result.entry);
       await this.history.record({
-        kind: result.mergedContent ? "merge" : "change",
+        kind: deleted ? "delete" : result.mergedContent ? "merge" : "change",
         path: change.path,
         by: actorId,
         detail: result.mergedContent ? "merged cleanly" : undefined,
-        version: result.entry?.version,
+        version,
         at: Date.now(),
       });
       this.broadcast(
@@ -323,7 +330,7 @@ export class Hub extends Agent<HubEnv, Record<string, never>> implements HubRpc 
           type: "changed",
           path: change.path,
           newHash: result.entry?.blobHash ?? null,
-          version: result.entry?.version ?? 0,
+          version,
           by: actorId,
         }),
       );

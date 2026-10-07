@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
+  "scripts": {
+    "dev": "cf dev -- --port ${HYPHAE_HUB_PORT:-8787} --ip 127.0.0.1"
+  },
   "dependencies": {
     "@hyphae/core": "workspace:*",
     "@hyphae/hub": "workspace:*",

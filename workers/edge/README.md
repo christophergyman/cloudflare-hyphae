@@ -21,4 +21,17 @@ cd workers/edge && bunx cf deploy
 bun test workers/edge
 ```
 
+## Local dev
+
+```
+bun run dev          # this package, from workers/edge
+```
+
+From the repo root, `bun run dev` starts this Worker and the console together
+(see `scripts/dev.ts`). The underlying command is `cf dev` on port 8787;
+arguments after `--` are forwarded to the dev server. Serves the API, the Hub
+Durable Object, and the built console assets (`apps/web/dist`, set by
+`wrangler.config.ts`). Build the console first with
+`bun run --cwd apps/web build`.
+
 See `docs/deploy-your-own.md` for the full path.

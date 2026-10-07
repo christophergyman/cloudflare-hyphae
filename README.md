@@ -8,6 +8,19 @@ A repo whose files stay in sync live across a team, backed by real git history o
 
 ## Getting started
 
+Run the whole stack locally, no Cloudflare account needed:
+
+```
+bun install
+bun run dev        # Hub on 8787 + console on 5173
+bun run dev:demo   # the above, plus a CLI client watching ./demo
+```
+
+Open `http://localhost:5173`, connect to repo `demo`, and use the composer and
+one-click scenarios to exercise sync, clean merges, and conflicts. The console
+is covered in `apps/web/README.md`, and the orchestrator in `scripts/dev.ts`
+(supports `HYPHAE_HUB_PORT` and `HYPHAE_WEB_PORT`).
+
 To run the demo on your own Cloudflare account, follow **`docs/deploy-your-own.md`**
 (Bun, a Workers Paid plan, and Artifacts open beta are the prerequisites).
 
@@ -197,7 +210,7 @@ Full detail is in `docs/hyphae-adr.md` and `docs/hyphae-stack.md`.
 /apps
   /cli            Bun + TS    human CLI and the local daemon (watcher + sync + journal)
   /mcp            TS          MCP server for agents (planned, not built)
-  /web            TS          simple live view
+  /web            TS          live console (Vite + React + shadcn/ui)
 /workers
   /edge           TS          auth, routing, REST, WebSocket upgrade, blob transport
   /hub-do         TS          the Hub (Agents SDK Agent)

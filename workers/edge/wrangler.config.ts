@@ -4,5 +4,5 @@ export default defineWranglerConfig({
   types: {
     generate: false,
   },
-  assetsDirectory: "../../apps/web/public",
+  assetsDirectory: "../../apps/web/dist",
 });

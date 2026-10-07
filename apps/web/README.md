@@ -1,38 +1,64 @@
-# Hyphae live view
+# @hyphae/web
 
-A read-only dashboard that watches a repo in real time: connected actors, the
-current files, a live activity feed, and a preview of the selected file.
+The Hyphae console: a live view of one repo's Hub and a full test client, so
+the whole system can be exercised from the browser (ADR-013). Built with Vite,
+React, Tailwind v4, and shadcn/ui (`radix-nova` style, monochrome theme).
 
-It is served by the edge Worker via Static Assets, so the UI and the API share
-one origin and one deploy.
+## What it does
 
-## What it shows
+- Live presence, manifest, activity feed, and blob preview for one repo
+- **One editor per tab**: an actor name you control, persisted locally, with
+  `?actor=` overrides. Two tabs (or a tab and a CLI daemon) behave like two
+  teammates. `?view=1` connects as a read-only observer
+- **Invite links**: copies `?repo=...&actor=...` for a second teammate
+- **Auto-connect**: `?repo=` deep links and the last used repo connect on load
+- **Auto-reconnect**: backoff retries with a visible reconnecting state, last
+  update time, and a manual Retry
+- **Composer strip**: write, delete (tombstone), and one-click scenarios that
+  generate real protocol traffic: clean merge, same-line conflict, big file
+- **Conflict strip**: the agent lifecycle for each conflict (attempting, kept
+  both, resolved) without reading the feed
+- **Feed filters** (files, merges, conflicts, agent) and **line diffs** against
+  the previous version seen while the tab was open
+- Empty states include the exact CLI command to start a real client
 
-- **Connected:** who is in the room (humans, agents, and other viewers).
-- **Files:** current files and their versions, from the Hub manifest.
-- **Activity:** a live feed of changes, clean merges, conflicts, and agent
-  resolutions. The Hub keeps the last 200 events, so the feed is populated the
-  moment you open or refresh.
-- **Preview:** the current content of the file you select, fetched from R2.
+## Dev
 
-## How it works
-
-The view connects to the Hub as an observer (`observer=1`) over the same
-WebSocket the clients use. It listens for `manifest`, `presence`, `history`,
-`changed`, `conflict`, and `resolved`, and fetches blob content over HTTP. It
-holds no state of its own and never edits anything.
-
-## Run it
-
-Served automatically by the edge Worker:
+From the repo root, one command starts the Hub and this console:
 
 ```
-cd workers/edge
-bunx cf deploy
+bun run dev
 ```
 
-Then open the Worker URL and enter a repo name (or use `?repo=name`).
+Or run the pieces yourself, still with no Cloudflare account required:
 
-To run the UI locally against the deployed Hub, serve `apps/web/public` with any
-static server and open it; it targets the same origin by default, so for local
-dev point it at the deployed origin by hosting the files there.
+```
+cd workers/edge && bun run dev     # the Hub and API on 8787
+cd apps/web && bun run dev         # the console on 5173
+```
+
+Vite proxies `/health`, `/repos`, `/blobs`, and `/agents` (WebSocket included)
+to the Hub. Point at another Hub with
+`HYPHAE_HUB_TARGET=https://<worker> bun run dev`.
+
+## Build
+
+```
+bun run build
+```
+
+Output lands in `apps/web/dist`, which `workers/edge/wrangler.config.ts`
+(`assetsDirectory`) serves as the Worker's static assets, so one `cf deploy`
+ships the API and this console together.
+
+## Theme
+
+All colors are CSS variables in `src/index.css`. The palette is deliberately
+monochrome for now; the `--signal-*` tokens (change, merge, conflict, resolved,
+delete, error) differ by lightness only, and swapping in hues is a token edit.
+Corners are near-zero radius (`--radius`) for a sharp, instrument-like feel.
+
+## Legacy
+
+The previous no-build live view lives in `public/` for reference. It is no
+longer served now that the assets directory points at `dist/`.

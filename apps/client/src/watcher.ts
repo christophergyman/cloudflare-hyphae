@@ -83,7 +83,7 @@ export class Watcher {
       this.reconnectTimer = null;
     }
     const base = this.hub as string;
-    const wsUrl = `${base.replace(/^http/, "ws")}/agents/hub/${this.repo}?actorId=${encodeURIComponent(this.actorId)}`;
+    const wsUrl = `${base.replace(/^http/, "ws")}/agents/hub/${this.repo}?actorId=${encodeURIComponent(this.actorId)}&displayName=${encodeURIComponent(this.actorId)}`;
     const socket = new WebSocket(wsUrl);
     this.socket = socket;
 

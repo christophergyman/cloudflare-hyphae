@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+demo/
 .wrangler/
 .cloudflare/
 .dev.vars
