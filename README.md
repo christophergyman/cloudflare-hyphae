@@ -81,6 +81,35 @@ We do not invent a merge engine. We sync at the **file** level and let **git** m
 
 ---
 
+## A useful mental model: multiplayer rooms
+
+Hyphae is easier to reason about as a **server-authoritative multiplayer game for files**. One room per repo.
+
+| Multiplayer concept | Hyphae |
+|---|---|
+| Game server / room | The Hub Durable Object, one per repo, the single authority |
+| Players and spectators | Actors; observers connect as viewers |
+| Player list | The `presence` broadcast |
+| Moves | File changes (saves and deletes) |
+| Authoritative state | The manifest: path to current version |
+| "Which frame did you edit from?" | `baseHash`, the version the client believed was current |
+| State broadcast | `changed`, `conflict`, `resolved` messages |
+| Two players grabbing the same lines | A same-line conflict |
+| Referee bot | The merging agent, accepted only if the tests pass |
+| Replays and save files | Artifacts checkpoints (real git history) |
+| Party invite | A `?repo=<name>&actor=<name>` link |
+
+This is why conflict detection is one comparison against `baseHash`, with no CRDTs, no vector clocks, and no distributed consensus: a room has one authority. Joining late works like any join-in-progress, where a new client receives the manifest and the recent history.
+
+Where the analogy breaks, deliberately:
+
+- **Event-level, not twitch.** The unit is a file save, debounced, not a keystroke (rule 1).
+- **No prediction or rollback.** Clients edit optimistically, the Hub accepts or merges, and broadcasts carry version guards so stale state cannot clobber newer content.
+- **Content travels out of band.** Control messages ride the WebSocket; file bytes ride R2.
+- **Two layers, two architectures.** The live layer is a star (client and server); the durable layer is distributed git on Artifacts. Server for liveness, git for durability, and never the wrong one for the job.
+
+---
+
 ## The Hub orchestrates; it does not do the heavy lifting
 
 The Hub is the conductor, not the orchestra. It is deliberately thin: it decides and coordinates, and delegates the expensive work. That separation is why it stays fast and why big files never bottleneck it.
