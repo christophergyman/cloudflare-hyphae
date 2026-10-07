@@ -54,6 +54,14 @@ managed image, add it under `images` in the `defineContainer` entry and start
 `ctx.container.images.sandbox` in `Sandbox`. That path requires Docker at deploy
 time.
 
+## Types
+
+`worker-configuration.d.ts` is committed so `bun run check` typechecks without a
+build step. After changing bindings, regenerate types with `cf workers types`
+(which writes `.cloudflare/types/index.d.ts`) and copy the result over the
+committed file. `wrangler types` no longer works because the Wrangler
+configuration file is gone.
+
 ## Tests
 
 ```

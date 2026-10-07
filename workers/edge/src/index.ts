@@ -20,7 +20,7 @@ import { routeAgentRequest } from "agents";
  */
 export interface Env {
   BLOBS: R2Bucket;
-  /** The Hub Durable Object namespace (bound as `Hub` in wrangler.toml). */
+  /** The Hub Durable Object namespace (declared in cloudflare.config.ts). */
   Hub: DurableObjectNamespace<Hub>;
   /** Static assets (apps/web/public): the live view. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
@@ -29,7 +29,7 @@ export interface Env {
    * carries AI Gateway routing (ADR-021).
    */
   AI?: { run(model: string, options: unknown, extra?: unknown): Promise<unknown> };
-  /** Merge model name (see wrangler.toml). */
+  /** Merge model name (see cloudflare.config.ts). */
   MODEL?: string;
   /** AI Gateway id for the merge model (ADR-021). Optional. */
   AI_GATEWAY_ID?: string;

@@ -11,7 +11,7 @@
  *
  * Deploy and run:
  *   cd spikes/artifacts-push
- *   bunx wrangler dev
+ *   bunx cf dev
  *   curl -X POST http://localhost:8787/push
  */
 

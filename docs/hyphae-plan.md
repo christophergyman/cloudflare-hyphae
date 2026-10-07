@@ -257,7 +257,7 @@ Sizes:  S     S     M       L     S-M     M     M      M      S     ongoing
 
 **Why now:** This is the trust layer and the differentiator (ADR-014). The demo is not complete without it.
 
-**Status:** Designed, not wired. The merge agent is built and unit-tested, but no `[[workflows]]` or `[[containers]]` binding exists, so on the deployed Worker it always keeps both sides.
+**Status:** Built and deployed as its own Worker (`MergeWorkflow` plus a container-backed `Sandbox`). The Hub does not route conflicts to it yet, so end-to-end verified merges are not wired; the container currently receives only the conflicted file and defaults to `npm test`.
 
 **Deliverables**
 

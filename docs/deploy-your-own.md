@@ -12,7 +12,7 @@ This guide assumes a **fresh Cloudflare account** and no existing resources.
 - **A Cloudflare account on the Workers Paid plan** (about $5/mo). Artifacts,
   Containers, Workflows, and the good Workers AI code models all require it.
 - **Artifacts open beta access.** Artifacts is in open beta and available on the
-  Workers Paid plan. If the `[[artifacts]]` binding is rejected at deploy time,
+  Workers Paid plan. If the `ARTIFACTS` binding is rejected at deploy time,
   your account does not have access yet.
 - **Node.js 22.18 or later** for the `cf` CLI, which loads
   `cloudflare.config.ts`. `cf` and Wrangler are dev dependencies, so
@@ -106,12 +106,14 @@ bunx cf deploy
 
 The deployment entry is `src/worker.ts`. It exports:
 
-- `MergeWorkflow` (`src/workflow.ts`), bound as `MERGE_WORKFLOW` through
-  `[[workflows]]`. Its `run` calls `runConflictJob` inside a single `step.do`,
-  so a merge is persisted and retried durably.
-- `Sandbox`, a Durable Object bound as `SANDBOX` through `[[containers]]` with
-  `scheduling_policy = "durable_object"`. The verifier writes the candidate
-  tree into the container and runs the project's test command there.
+- `MergeWorkflow` (`src/workflow.ts`), declared with `exports.workflow` and
+  bound as `MERGE_WORKFLOW`. Its `run` calls `runConflictJob` inside a single
+  `step.do`, so a merge is persisted and retried durably.
+- `Sandbox`, a Durable Object declared with `exports.durableObject` and bound
+  as `SANDBOX`. Its container application is the `defineContainer` entry with
+  the Durable Object scheduling policy, attached to that export. The verifier
+  writes the candidate tree into the container and runs the project's test
+  command there.
 
 It uses the same default merge model as the Hub (`DEFAULT_MERGE_MODEL` in
 `packages/merge-agent/src/model.ts`) unless `MODEL` is set to override it.
@@ -150,11 +152,13 @@ export.
 
 To bake git and a pinned Node into the image instead, add the repo Dockerfile as
 a named image in the same `defineContainer` (this requires Docker on the machine
-that runs `cf deploy`):
+that runs `cf deploy`). Keep the application `name` unchanged: a Durable Object
+namespace links to exactly one container application, and an existing
+deployment rejects a new name (ADR-024).
 
 ```ts
 const sandbox = defineContainer({
-  name: "hyphae-sandbox",
+  name: "hyphae-merge-workflow-sandbox",
   schedulingPolicy: "durable-object",
   images: {
     sandbox: { dockerfile: "../../infra/container/Dockerfile" },
@@ -179,10 +183,12 @@ limits, fallback, provider keys):
    which routes the call through the gateway (ADR-021). Leave it unset to call
    Workers AI directly. See `docs/hyphae-stack.md` for the intended wiring.
 3. For an external provider, keep the provider key out of source. Store it with
-   Secrets Store or:
+   Secrets Store or Wrangler. `cf` cannot set a single secret yet, and it keeps
+   its own credentials, so sign in to Wrangler first (`bunx wrangler login`) or
+   set `CLOUDFLARE_API_TOKEN`:
 
 ```
-bunx wrangler secret put <NAME> --name hyphae-edge   # cf cannot set a single secret yet
+bunx wrangler secret put <NAME> --name hyphae-edge
 ```
 
 No secret is required for the Workers AI default path.

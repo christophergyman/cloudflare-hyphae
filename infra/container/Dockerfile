@@ -6,9 +6,9 @@
 #
 # This is the optional baked image for the wired `Sandbox` Durable Object in
 # workers/merge-workflow. The default wiring uses the Cloudflare-managed
-# `cloudflare/debian-trixie` image so `wrangler deploy` needs no Docker. To use
-# this image, add a named image pointing here in that wrangler.toml (see its
-# README) and build it with Docker at deploy time.
+# `cloudflare/debian-trixie` image so `cf deploy` needs no Docker. To use this
+# image, add it under `images` in the `defineContainer` entry in that Worker's
+# cloudflare.config.ts (see its README) and build it with Docker at deploy time.
 
 FROM node:22-slim
 

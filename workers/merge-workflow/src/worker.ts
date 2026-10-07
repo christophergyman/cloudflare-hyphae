@@ -31,7 +31,7 @@ export class Sandbox extends DurableObject<MergeWorkflowEnv> {
   private container(): Container {
     const container = this.ctx.container;
     if (!container) {
-      throw new Error("Sandbox has no container: check the [[containers]] binding");
+      throw new Error("Sandbox has no container: check the container configuration");
     }
     if (!container.running) {
       container.start({
