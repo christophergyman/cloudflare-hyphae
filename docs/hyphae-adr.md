@@ -311,6 +311,18 @@ updateRef(name, ref, hash) -> void
 - **Rationale:** Closes the highest-risk deferred item, a runaway agent spoiling the live demo, with configuration rather than code.
 - **Consequences:** Update the accepted-risk note in `hyphae-context.md` once implemented.
 
+### ADR-024: Project configuration and deploys use the cf CLI
+
+- **Status:** Accepted
+- **Date:** 2026-10-07
+- **Context:** The `cf` CLI (beta) configures Workers projects with a typed `cloudflare.config.ts` and covers account commands Wrangler does not. Wrangler remains the build and dev-server engine that `cf` delegates to for this repo's projects.
+- **Decision:** Every Worker is configured by `cloudflare.config.ts` and deployed with `cf`. `wrangler.toml` files are deleted once a live `cf` deploy is verified. Wrangler stays a pinned development dependency because `cf` requires it for builds, and `wrangler tail` / `wrangler secret put` remain the only ways to stream logs and set a single secret.
+- **Notes:**
+  - `cf migrate` converted each Worker. The merge Workflow's Workflow export, container application, and Sandbox attach were finished by hand; cf does not migrate Workflows or Containers.
+  - cf 1.0.0-beta.12 emits `script_name` for self-referencing Durable Object bindings, then rejects it when the class has a container attached. `SANDBOX` is declared as a raw `durable_object_namespace` binding, exactly what `wrangler.toml` produced. The intended replacement is `ctx.exports` with the `enable_ctx_exports` flag; revisit at the next cf bump.
+  - CI validates each Worker with `cf deploy --dry-run` on Node 22.18 or later.
+- **Consequences:** Config is TypeScript with typed bindings and compile-time checked cross-Worker export names. Build Output lives in `.cloudflare/` (gitignored). cf is beta: pin it and re-check the self-reference workaround on upgrades.
+
 ---
 
 ## Part 3. Data Model

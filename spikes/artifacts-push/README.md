@@ -35,7 +35,7 @@ Worker in `src/worker.ts` implements it.
 
 ```
 cd spikes/artifacts-push
-bunx wrangler dev
+bunx cf dev
 curl -X POST http://localhost:8787/push
 ```
 
@@ -64,4 +64,4 @@ Container (`ctx.container`) and push from there. The port in
 |---|---|
 | `scripts/local-push.ts` | Runnable harness, smart-HTTP push, no credentials |
 | `src/worker.ts` | The Artifacts Worker (needs an Artifacts binding); uses `MemoryFS` from `@hyphae/repostore` |
-| `wrangler.toml` | Worker config with the `artifacts` binding |
+| `cloudflare.config.ts` | Worker config with the `artifacts` binding |

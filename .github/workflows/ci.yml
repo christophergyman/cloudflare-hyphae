@@ -14,8 +14,10 @@ jobs:
       - run: bun run check
       - run: bunx biome check .
 
-  # Validate each Worker's wrangler config the way a real deploy would, without
-  # touching Cloudflare. Catches binding, export, and migration mistakes in CI.
+  # Validate each Worker the way a real deploy would, without touching
+  # Cloudflare. Catches binding, export, asset, and container mistakes in CI.
+  # `cf` loads cloudflare.config.ts on Node 22.18+, so Node is installed before
+  # Bun runs the workspace install.
   deploy-dry-run:
     runs-on: ubuntu-latest
     strategy:
@@ -23,7 +25,10 @@ jobs:
         worker: [workers/edge, workers/merge-workflow]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - run: bunx wrangler deploy --dry-run
+      - run: bunx cf deploy --dry-run
         working-directory: ${{ matrix.worker }}

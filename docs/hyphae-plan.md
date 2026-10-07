@@ -39,6 +39,7 @@ Each checkpoint answers three questions:
 - **Live deployment:** `https://<your-worker>.workers.dev` (API plus the live view).
 - **Proven live:** two-client sync over the Agents SDK WebSocket, a concurrent disjoint clean-merge with correct content, a same-line conflict, R2 blob round-trips, and the live view updating in real time.
 - **Done:** contracts, the Hub, the Artifacts adapter and checkpoints, the client watcher, the verified merge agent, the CLI, and the live view.
+- **Tooling:** every Worker is configured with `cloudflare.config.ts` and deployed with `cf` (ADR-024).
 - **Live and proven:** Artifacts checkpoints. The `ARTIFACTS` binding is wired and the Hub builds its durable store from it, so a forced commit returns `{"committed":true}`.
 - **Built, not wired live:** the AI merge. The merge agent is built and unit-tested, but no sandbox/container binding exists, so it always keeps both sides.
 - **Next:** wire the sandbox/container for the AI merge, then the MCP surface.

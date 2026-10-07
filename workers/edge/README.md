@@ -12,12 +12,12 @@ Entry point: `src/index.ts`.
 - `Env`: the Worker bindings (`BLOBS`, `Hub`, `ARTIFACTS`, `AI`, `ASSETS`,
   `MODEL`, `ENVIRONMENT`).
 - Re-exports `Hub` from `@hyphae/hub` so the Durable Object class ships in the
-  same Worker. One `wrangler deploy` covers the edge and the Hub.
+  same Worker. One `cf deploy` covers the edge and the Hub.
 
 ## Deploy and tests
 
 ```
-cd workers/edge && bunx wrangler deploy
+cd workers/edge && bunx cf deploy
 bun test workers/edge
 ```
 

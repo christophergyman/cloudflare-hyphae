@@ -16,7 +16,7 @@ Entry point: `src/index.ts`.
   `MergeJob`, `SandboxLike`, `AiBindingLike`.
 
 `DEFAULT_MERGE_MODEL` is the single source of truth for the merge model. Keep
-the `MODEL` values in both `wrangler.toml` files in sync with it.
+the `MODEL` values in both `cloudflare.config.ts` files in sync with it.
 
 ## Tests
 

@@ -18,7 +18,7 @@ These exercise the real bindings: Agents SDK WebSocket, Durable Objects, R2, Art
 | Concurrent **disjoint** edits to one file | Hub clean-merges, correct content (`ALPHA\nbeta\nGAMMA\n`) |
 | Concurrent **same-line** edits | Hub surfaces `conflict` |
 | `POST /repos/:name/commit` | 200, `{"committed":true}` (Artifacts bound as the durable store) |
-| Durable Object execution in `wrangler tail` | healthy, ~8ms CPU, no errors |
+| Durable Object execution in `wrangler tail` (cf cannot stream logs yet) | healthy, ~8ms CPU, no errors |
 
 Reproduce the live checks:
 

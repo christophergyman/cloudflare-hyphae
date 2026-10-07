@@ -23,7 +23,7 @@ This document does not decide architecture (the ADR does). It pins the libraries
 | Layer | Choice | Why | Notes / risk |
 |---|---|---|---|
 | Language | TypeScript, strict, `moduleResolution: bundler`, ES2022 | One language, edge and client | No Node types in shared packages |
-| Monorepo | Bun workspaces | Fast, works with Wrangler | `bun install`, workspace scripts |
+| Monorepo | Bun workspaces | Fast, works with cf and Wrangler | `bun install`, workspace scripts |
 | Client runtime | Bun | Fast startup for the daemon | The daemon uses `node:fs` where needed |
 | Edge runtime | Workers (workerd) with a pinned `compatibility_date` | Cloudflare default | Bump the date deliberately, not blindly |
 | Hub | **Agents SDK `Agent`** on a Durable Object, one per repo (ADR-017) | State, hibernating WebSockets, scheduling, RPC, observability for free | Drop to the raw DO API for the hot sync loop if the framework fights it |
@@ -88,7 +88,7 @@ This document does not decide architecture (the ADR does). It pins the libraries
 | Property tests | `fast-check` | The merge core especially |
 | Integration | Miniflare via the Vitest integration | Two WebSocket clients, one Hub |
 | Lint / format | Biome | One tool, fast |
-| Deploy | Wrangler | `artifacts` binding, `remote = true` for local dev |
+| Deploy | **cf** with `cloudflare.config.ts` (ADR-024) | `artifacts` binding, `remote = true` for local dev |
 | Observability | Workers Logs, Tail Workers, and the Agents SDK tracing | Debug the Hub and the Workflow |
 
 ---

@@ -14,7 +14,9 @@ This guide assumes a **fresh Cloudflare account** and no existing resources.
 - **Artifacts open beta access.** Artifacts is in open beta and available on the
   Workers Paid plan. If the `[[artifacts]]` binding is rejected at deploy time,
   your account does not have access yet.
-- **Wrangler** is a dev dependency, so `bunx wrangler` works after install.
+- **Node.js 22.18 or later** for the `cf` CLI, which loads
+  `cloudflare.config.ts`. `cf` and Wrangler are dev dependencies, so
+  `bunx cf` works after install.
 
 ## 1. Install dependencies
 
@@ -27,11 +29,11 @@ bun install
 ## 2. Log in to Cloudflare
 
 ```
-bunx wrangler login
+bunx cf auth login
 ```
 
-This opens a browser and stores an OAuth token locally. Verify with
-`bunx wrangler whoami`.
+This opens a browser and stores an OAuth token for `cf`. Verify with
+`bunx cf auth whoami`.
 
 ## 3. Create the R2 bucket
 
@@ -39,18 +41,18 @@ Blob content is content-addressed and lives in R2. The binding is `BLOBS` and
 the default bucket name is `hyphae-blobs`:
 
 ```
-bunx wrangler r2 bucket create hyphae-blobs
+bunx cf r2 buckets create-by-name hyphae-blobs
 ```
 
-If you pick a different name, update `bucket_name` in the next step to match.
+If you pick a different name, update the `BLOBS` binding in the next step to match.
 
 ## 4. Configure the edge Worker
 
-Open `workers/edge/wrangler.toml` and check two things:
+Open `workers/edge/cloudflare.config.ts` and check two things:
 
-- **`bucket_name`** under `[[r2_buckets]]` must match the bucket you created
-  (default `hyphae-blobs`).
-- **`compatibility_date`** should be recent. It currently reads `2026-10-01`;
+- **`BLOBS`** must match the bucket you created
+  (`bindings.r2({ name: "hyphae-blobs" })`).
+- **`compatibilityDate`** should be recent. It currently reads `2026-10-01`;
   bump it to today or a date you are happy pinning. Do not set it in the future.
 
 The other bindings work as-is:
@@ -76,18 +78,18 @@ re-exported at `workers/edge/src/index.ts:125`:
 export { Hub } from "@hyphae/hub";
 ```
 
-Wrangler sees that re-export and bundles the Hub into the same Worker, so the
-`[[durable_objects.bindings]]` and `[exports.Hub]` entries in the toml resolve
-without a second deploy.
+The bundler sees that re-export and bundles the Hub into the same Worker, so the
+`Hub` binding and `exports.Hub` entry in `cloudflare.config.ts` resolve without
+a second deploy.
 
 ```
 cd workers/edge
-bunx wrangler deploy
+bunx cf deploy
 ```
 
-The first deploy creates the SQLite-backed `Hub` class from the declarative
-`[exports.Hub]` entry.
-Wrangler prints the deployed URL, for example
+The first deploy creates the SQLite-backed `Hub` class from the `exports.Hub`
+entry.
+`cf` prints the deployed URL, for example
 `https://hyphae-edge.<your-subdomain>.workers.dev`. Use that URL below.
 
 ## 6. Optional: deploy the merge Workflow
@@ -99,7 +101,7 @@ test-verified merge path from ADR-014.
 
 ```
 cd workers/merge-workflow
-bunx wrangler deploy
+bunx cf deploy
 ```
 
 The deployment entry is `src/worker.ts`. It exports:
@@ -139,19 +141,25 @@ curl -s $WORKFLOW_URL/merge/<instance-id>
 ### Container
 
 The container is wired with the Cloudflare-managed `cloudflare/debian-trixie`
-image and the `durable_object` scheduling policy, so no image build is needed
-and `wrangler deploy --dry-run` passes without Docker. The Sandbox DO starts the
+image and the `durable-object` scheduling policy, so no image build is needed
+and `cf deploy --dry-run` passes without Docker. The Sandbox DO starts the
 image on first use and runs the project's tests with outbound Internet enabled
-so dependencies can install.
+so dependencies can install. That wiring is the `defineContainer` entry in
+`workers/merge-workflow/cloudflare.config.ts`, attached to the `Sandbox`
+export.
 
-To bake git and a pinned Node into the image instead, build the repo Dockerfile
-as a named image. This requires Docker on the machine that runs `wrangler
-deploy`:
+To bake git and a pinned Node into the image instead, add the repo Dockerfile as
+a named image in the same `defineContainer` (this requires Docker on the machine
+that runs `cf deploy`):
 
-```
-# in workers/merge-workflow/wrangler.toml
-[containers.images.sandbox]
-dockerfile = "../../infra/container/Dockerfile"
+```ts
+const sandbox = defineContainer({
+  name: "hyphae-sandbox",
+  schedulingPolicy: "durable-object",
+  images: {
+    sandbox: { dockerfile: "../../infra/container/Dockerfile" },
+  },
+});
 ```
 
 Then start `ctx.container.images.sandbox` in `Sandbox` instead of the managed
@@ -165,8 +173,9 @@ binding named `AI`. To route model calls through **AI Gateway** (caching, rate
 limits, fallback, provider keys):
 
 1. Create a gateway in the Cloudflare dashboard under AI Gateway.
-2. Set `AI_GATEWAY_ID` to the gateway id in `workers/edge/wrangler.toml` (and
-   `workers/merge-workflow/wrangler.toml`). The Hub passes it to the merge model,
+2. Add `AI_GATEWAY_ID: bindings.text("<gateway-id>")` to the `env` in
+   `workers/edge/cloudflare.config.ts` (and
+   `workers/merge-workflow/cloudflare.config.ts`). The Hub passes it to the merge model,
    which routes the call through the gateway (ADR-021). Leave it unset to call
    Workers AI directly. See `docs/hyphae-stack.md` for the intended wiring.
 3. For an external provider, keep the provider key out of source. Store it with
@@ -174,7 +183,7 @@ limits, fallback, provider keys):
 
 ```
 cd workers/edge
-bunx wrangler secret put <NAME>
+bunx wrangler secret put <NAME>   # cf cannot set a single secret yet
 ```
 
 No secret is required for the Workers AI default path.
@@ -230,9 +239,9 @@ See `apps/cli/README.md` and `apps/client/README.md` for the watcher details.
 - **Artifacts binding rejected:** the account lacks open beta access. This is a
   prerequisite, not a config error.
 - **`committed:false`:** either nothing changed or `ARTIFACTS` is missing. Check
-  the binding in `wrangler.toml`.
+  the binding in `cloudflare.config.ts`.
 - **413 on `/blobs`:** the body exceeded the 1.5 MB inline cap. Presigned R2
   URLs are designed but not implemented (`/blobs/presign` returns 501).
-- **Model override:** `MODEL` is optional. When set in a `wrangler.toml` it must
-  be a valid Workers AI model. The default is `DEFAULT_MERGE_MODEL` in
+- **Model override:** `MODEL` is optional. When set in `cloudflare.config.ts` it
+  must be a valid Workers AI model. The default is `DEFAULT_MERGE_MODEL` in
   `packages/merge-agent/src/model.ts`.

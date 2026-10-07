@@ -28,7 +28,7 @@ Served automatically by the edge Worker:
 
 ```
 cd workers/edge
-npx wrangler deploy
+bunx cf deploy
 ```
 
 Then open the Worker URL and enter a repo name (or use `?repo=name`).

@@ -21,15 +21,19 @@ this Workflow cannot diverge. The `MODEL` var stays in sync with
 
 ## Deployment
 
-`wrangler.toml` points `main` at `src/worker.ts`, which is the only workerd
-entry:
+`cloudflare.config.ts` points `entrypoint` at `src/worker.ts`, which is the only
+workerd entry:
 
 - `src/workflow.ts`: `MergeWorkflow extends WorkflowEntrypoint`. Its `run` calls
-  `runConflictJob` inside `step.do("merge", ...)`. Bound as `MERGE_WORKFLOW`.
+  `runConflictJob` inside `step.do("merge", ...)`. Declared with
+  `exports.workflow` and bound as `MERGE_WORKFLOW`.
 - `src/worker.ts`: default `fetch` handler and the `Sandbox` Durable Object.
-  `Sandbox` uses `ctx.container` with the `durable_object` scheduling policy and
+  `Sandbox` uses `ctx.container` with the DO-managed scheduling policy and
   starts the Cloudflare-managed `cloudflare/debian-trixie` image, so no image
-  build is needed. Bound as `SANDBOX`.
+  build is needed. The container application is the `defineContainer` entry,
+  attached to the `Sandbox` export. `SANDBOX` is a raw
+  `durable_object_namespace` binding because cf beta rejects a `script_name`
+  on the class a container is attached to; see the comment in the config.
 
 Routes:
 
@@ -42,13 +46,13 @@ Routes:
 Deploy from this directory:
 
 ```
-bunx wrangler deploy
+bunx cf deploy
 ```
 
 To bake git and a pinned Node into the sandbox image instead of using the
-managed image, add `[containers.images.sandbox] dockerfile =
-"../../infra/container/Dockerfile"` and start `ctx.container.images.sandbox`.
-That path requires Docker at deploy time.
+managed image, add it under `images` in the `defineContainer` entry and start
+`ctx.container.images.sandbox` in `Sandbox`. That path requires Docker at deploy
+time.
 
 ## Tests
 
