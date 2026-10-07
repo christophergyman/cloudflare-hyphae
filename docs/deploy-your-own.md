@@ -182,8 +182,7 @@ limits, fallback, provider keys):
    Secrets Store or:
 
 ```
-cd workers/edge
-bunx wrangler secret put <NAME>   # cf cannot set a single secret yet
+bunx wrangler secret put <NAME> --name hyphae-edge   # cf cannot set a single secret yet
 ```
 
 No secret is required for the Workers AI default path.

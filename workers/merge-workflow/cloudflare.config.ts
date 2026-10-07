@@ -5,9 +5,13 @@ import { bindings, defineConfig, defineContainer, exports } from "cf/config";
  * Durable Object starts an isolated container per merge attempt, so the image
  * is chosen at start time. The migration kept this scheduling policy from the
  * Wrangler config.
+ *
+ * The name must match the application the previous Wrangler deploys created
+ * (`<worker>-<class>` naming), because a Durable Object namespace can be linked
+ * to exactly one container application.
  */
 const sandbox = defineContainer({
-  name: "hyphae-sandbox",
+  name: "hyphae-merge-workflow-sandbox",
   schedulingPolicy: "durable-object",
 });
 

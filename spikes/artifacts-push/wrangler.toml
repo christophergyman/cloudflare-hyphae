@@ -1,9 +1,0 @@
-name = "hyphae-spike-artifacts-push"
-main = "src/worker.ts"
-compatibility_date = "2026-10-01"
-compatibility_flags = ["nodejs_compat"]
-
-# Artifacts binding: create/fork/inspect repos and mint git tokens (ADR-018).
-[[artifacts]]
-binding = "ARTIFACTS"
-namespace = "default"

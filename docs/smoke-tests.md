@@ -55,8 +55,10 @@ and a regression test covers it.
 
 ## Not yet exercised live
 
-- **AI merge with a sandbox.** The AI Gateway model path runs, but no
-  sandbox/container binding is configured, so the merge runner refuses to
-  accept unverified output and always keeps both sides (ADR-014).
+- **AI merge with a sandbox that can pass.** The Workflow and container run end
+  to end live (verified 2026-10-07), but the sandbox receives only the
+  conflicted file and defaults to `npm test`, so verification fails and the
+  result is kept-both. Staging the full project tree and setting the test
+  command is the remaining demo work.
 - **R2 presigned URLs.** `/blobs/presign` returns 501; the current transport is
   the Worker-proxied `/blobs` endpoint with a 1.5 MB cap (ADR-020).

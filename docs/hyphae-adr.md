@@ -320,6 +320,8 @@ updateRef(name, ref, hash) -> void
 - **Notes:**
   - `cf migrate` converted each Worker. The merge Workflow's Workflow export, container application, and Sandbox attach were finished by hand; cf does not migrate Workflows or Containers.
   - cf 1.0.0-beta.12 emits `script_name` for self-referencing Durable Object bindings, then rejects it when the class has a container attached. `SANDBOX` is declared as a raw `durable_object_namespace` binding, exactly what `wrangler.toml` produced. The intended replacement is `ctx.exports` with the `enable_ctx_exports` flag; revisit at the next cf bump.
+  - A Durable Object namespace links to exactly one container application. The `defineContainer` name must match the application earlier Wrangler deploys created (`hyphae-merge-workflow-sandbox`, Wrangler's `<worker>-<class>` naming); a new name is rejected at deploy even though the Worker version uploads.
+  - Verified live 2026-10-07: both Workers deployed with `cf`; two-client sync, a disjoint clean merge, and an Artifacts checkpoint through the Hub; the merge Workflow started the sandbox container and returned kept-both when `npm test` could not run.
   - CI validates each Worker with `cf deploy --dry-run` on Node 22.18 or later.
 - **Consequences:** Config is TypeScript with typed bindings and compile-time checked cross-Worker export names. Build Output lives in `.cloudflare/` (gitignored). cf is beta: pin it and re-check the self-reference workaround on upgrades.
 
